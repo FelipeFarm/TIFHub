@@ -101,7 +101,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
                       {isSelf && <span className="muted"> (you)</span>}
                       <small className="muted" style={{ display: "block" }}>
                         {t.email} · {t.role === "admin" ? "Admin" : "Team"}
-                        {t.mondayUserId ? " · monday linked" : " · monday not linked"}
+                        {t.mondayUserId ? " · monday linked" : " · monday not linked"}{t.slackUserId ? " · Slack linked" : ""}
                       </small>
                     </span>
                     {!t.active ? (

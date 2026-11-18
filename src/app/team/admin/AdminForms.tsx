@@ -87,7 +87,7 @@ export function ClientForm({
 export function TeamForm({
   member, mondayUsers, isSelf,
 }: {
-  member?: { id: string; name: string; email: string; role: string; mondayUserId: string | null };
+  member?: { id: string; name: string; email: string; role: string; mondayUserId: string | null; slackUserId: string | null };
   mondayUsers: MondayUser[];
   isSelf?: boolean;
 }) {
@@ -134,6 +134,10 @@ export function TeamForm({
           <label className="lbl" htmlFor={`te-${k}`}>Work email</label>
           <input className="input" id={`te-${k}`} name="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </div>
+      </div>
+      <div className="field">
+        <label className="lbl" htmlFor={`ts-${k}`}>Slack member ID (for @mentions in alerts)</label>
+        <input className="input mono" id={`ts-${k}`} name="slackUserId" defaultValue={member?.slackUserId ?? ""} placeholder="e.g. U04ABC123 · Slack profile → ⋯ → Copy member ID" maxLength={20} />
       </div>
       <div className="field">
         <label className="lbl" htmlFor={`tr-${k}`}>Access</label>

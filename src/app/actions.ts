@@ -10,7 +10,8 @@ import {
 } from "@/lib/auth";
 import { CHANNELS, NEED_ACTIONS, SERVICES, STATUS, URGENCY, type ServiceKey } from "@/lib/constants";
 import { checkFiles, filesFrom, saveFiles } from "@/lib/files";
-import { flushMonday, queue } from "@/lib/outbox";
+import { flushMonday, flushSlack, queue } from "@/lib/outbox";
+import { requestAlert, reviewAlert } from "@/lib/slack";
 import { replyByFor } from "@/lib/time";
 
 export type FormState = { error?: string } | undefined;
@@ -99,6 +100,7 @@ export async function createRequest(_: FormState, fd: FormData): Promise<FormSta
   await rememberName(askedBy);
   await queue("monday", "create_item", `Create item "${req.title}" for ${client.name}`, { request: req, files: files.length }, { requestId: req.id });
   await queue("ghl", "email_client", `Confirmation email to ${client.name}: "We got your request"`, { to: client.loginEmail, askedBy }, { requestId: req.id });
+  await queue("slack", "alert", `Slack: new request from ${client.name}`, { text: await requestAlert("new", req) }, { requestId: req.id });
   redirect(`/sent/${req.id}`);
 }
 
@@ -125,6 +127,7 @@ export async function clientReply(_: FormState, fd: FormData): Promise<FormState
   await db.update(requests).set({ clientRepliedAt: now, updatedAt: now }).where(eq(requests.id, id));
   await rememberName(name);
   await queue("monday", "add_update", `Add client reply to monday item for "${req.title}"`, { requestId: id, name, body }, { requestId: id });
+  await queue("slack", "alert", `Slack: ${client.name} replied on "${req.title}"`, { text: await requestAlert("reply", req, name) }, { requestId: id });
   redirect(`/requests/${id}`);
 }
 
@@ -156,6 +159,8 @@ export async function submitReview(_: FormState, fd: FormData): Promise<FormStat
   await rememberName(name);
   const changes = pending.filter((i) => str(fd, `d_${i.id}`) === "changes").length;
   await queue("monday", "add_update", `Approval "${appr.title}" reviewed by ${name}: ${pending.length - changes} approved, ${changes} changes`, { approvalId: id }, { approvalId: id });
+  const approvedTotal = items.filter((i) => i.decision === "approved").length + pending.length - changes;
+  await queue("slack", "alert", `Slack: ${client.name} reviewed "${appr.title}"`, { text: await reviewAlert(appr, name, approvedTotal, changes) }, { approvalId: id });
   redirect(`/approvals/${id}?done=1`);
 }
 
@@ -359,5 +364,6 @@ export async function retryOutbox(fd: FormData) {
   });
   const ids = [...new Set(rows.map((r) => r.requestId))].filter((id) => only === null || id === only);
   for (const id of ids) await flushMonday(id);
+  if (!only) await flushSlack(true);
   redirect("/team/outbox?retried=1");
 }

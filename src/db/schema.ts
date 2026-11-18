@@ -12,6 +12,8 @@ export const team = sqliteTable("team", {
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   // monday user id, so Owner can be set on the Hub Requests board.
   mondayUserId: text("monday_user_id"),
+  // Slack member id (starts with U), so alerts can @mention the Account Lead.
+  slackUserId: text("slack_user_id"),
 });
 
 /** One row per client company. One shared login per company. */

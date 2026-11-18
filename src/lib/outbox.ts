@@ -3,15 +3,16 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { outbox } from "@/db/schema";
 import { deliverMonday, mondayConfig } from "./monday";
+import { deliverSlack, slackConfig } from "./slack";
 
 /**
- * Queue something for GHL (client emails) or monday (items/updates), then try to send it.
- * monday is connected (step 4a). GHL events stay "pending" until step 4b.
+ * Queue something for GHL (client emails), monday (items/updates) or Slack (team alerts), then try to send it.
+ * monday and Slack send right away. GHL events stay "pending" until step 4b.
  * Sending never blocks or breaks what the person was doing: failures stay in the
  * Outbox with the reason, and the team can send them again from there.
  */
 export async function queue(
-  target: "ghl" | "monday",
+  target: "ghl" | "monday" | "slack",
   kind: string,
   summary: string,
   payload: Record<string, unknown>,
@@ -27,6 +28,7 @@ export async function queue(
     ...link,
   });
   if (target === "monday") await sendLater(() => flushMonday(link.requestId ?? null));
+  if (target === "slack") await sendLater(() => flushSlack());
 }
 
 /** Runs after the response is sent when the runtime allows it, so the page doesn't wait on monday. */
@@ -76,6 +78,37 @@ export async function flushMonday(requestId: number | null) {
     } catch (e) {
       await db.update(outbox).set({ status: "failed", error: String((e as Error).message ?? e).slice(0, 500) }).where(eq(outbox.id, row.id));
       break;
+    }
+  }
+}
+
+/** Sends waiting or failed Slack alerts. Order doesn't matter for alerts, so one failure doesn't hold up the rest. */
+export async function flushSlack(manual = false) {
+  if (!(await slackConfig())) return;
+  const db = await getDb();
+  const rows = await db.query.outbox.findMany({
+    where: and(eq(outbox.target, "slack"), inArray(outbox.status, ["pending", "failed"])),
+    orderBy: [asc(outbox.id)],
+    limit: 50,
+  });
+  for (const row of rows) {
+    // An alert that couldn't go out within a day is stale: the team has seen the inbox by then.
+    if (Date.now() - row.createdAt > 86_400_000) {
+      await db.update(outbox).set({ status: "skipped", error: "Too old to alert (over a day)" }).where(eq(outbox.id, row.id));
+      continue;
+    }
+    if (!manual && row.status === "failed" && row.attempts >= 5) continue; // stop retrying on its own; "Send again" still works
+    const claimed = await db
+      .update(outbox)
+      .set({ status: "sending", attempts: row.attempts + 1, claimedAt: Date.now() })
+      .where(and(eq(outbox.id, row.id), eq(outbox.status, row.status)))
+      .returning({ id: outbox.id });
+    if (!claimed.length) continue;
+    try {
+      await deliverSlack(JSON.parse(row.payload));
+      await db.update(outbox).set({ status: "sent", sentAt: Date.now(), error: null }).where(eq(outbox.id, row.id));
+    } catch (e) {
+      await db.update(outbox).set({ status: "failed", error: String((e as Error).message ?? e).slice(0, 500) }).where(eq(outbox.id, row.id));
     }
   }
 }

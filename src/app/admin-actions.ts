@@ -104,6 +104,8 @@ export async function saveTeamMember(_: AdminState, fd: FormData): Promise<Admin
   const email = str(fd, "email").toLowerCase();
   const role = fd.get("role") === "admin" ? "admin" : "account_lead";
   const mondayUserId = str(fd, "mondayUserId", 20).replace(/\D/g, "") || null;
+  const slackUserId = str(fd, "slackUserId", 20).toUpperCase() || null;
+  if (slackUserId && !/^[UW][A-Z0-9]{6,}$/.test(slackUserId)) return { error: "The Slack member ID starts with U, like U04ABC123. Find it in their Slack profile → ⋯ → Copy member ID." };
   if (!name) return { error: "Add their name." };
   if (!EMAIL.test(email)) return { error: "That email doesn't look right." };
   if (await emailTaken(email, id ? { type: "team", id } : undefined)) return { error: "Another account already uses that email." };
@@ -112,14 +114,14 @@ export async function saveTeamMember(_: AdminState, fd: FormData): Promise<Admin
   const db = await getDb();
   if (!id) {
     const tid = newId("t");
-    await db.insert(team).values({ id: tid, name, initials: initialsOf(name), email, passwordHash: NO_PASSWORD, role, mondayUserId });
+    await db.insert(team).values({ id: tid, name, initials: initialsOf(name), email, passwordHash: NO_PASSWORD, role, mondayUserId, slackUserId });
     await audit(me.name, "added team member", name, `${email} · ${role}`);
     revalidatePath("/team/admin");
     return { ok: `${name} is added. Send them this link so they can choose their password.`, ...(await linkState("team", tid, "invite", name, me.name)) };
   }
   const before = await db.query.team.findFirst({ where: eq(team.id, id) });
   if (!before) return { error: "Team member not found." };
-  await db.update(team).set({ name, initials: initialsOf(name), email, role, mondayUserId }).where(eq(team.id, id));
+  await db.update(team).set({ name, initials: initialsOf(name), email, role, mondayUserId, slackUserId }).where(eq(team.id, id));
   if (before.role !== role) await audit(me.name, role === "admin" ? "made admin" : "removed admin", name);
   if (before.email !== email) {
     await endAllSessions("team", id);
