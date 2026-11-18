@@ -12,14 +12,17 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   async headers() {
     const dev = process.env.NODE_ENV !== "production";
-    // Everything loads from the Hub itself: no outside scripts, fonts or trackers.
+    // Everything loads from the Hub itself, plus Webflow Cloud's file server, which serves
+    // the Hub's own scripts, styles and fonts (…wf-app-prod.cosmic.webflow.services).
+    // No other outside scripts, fonts or trackers.
+    const assets = "https://*.wf-app-prod.cosmic.webflow.services";
     const csp = [
       "default-src 'self'",
-      `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""}`,
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self'",
-      `connect-src 'self'${dev ? " ws:" : ""}`,
+      `script-src 'self' 'unsafe-inline' ${assets}${dev ? " 'unsafe-eval'" : ""}`,
+      `style-src 'self' 'unsafe-inline' ${assets}`,
+      `img-src 'self' data: blob: ${assets}`,
+      `font-src 'self' ${assets}`,
+      `connect-src 'self' ${assets}${dev ? " ws:" : ""}`,
       "frame-ancestors 'none'",
       "form-action 'self'",
       "base-uri 'self'",
