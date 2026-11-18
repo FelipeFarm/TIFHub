@@ -8,6 +8,8 @@ import { serviceLabel, URGENCY } from "@/lib/constants";
 import { teamMap } from "@/lib/queries";
 import { firstName } from "@/lib/sentences";
 import { replyByLabel } from "@/lib/time";
+import { offersLive, suggestionFor } from "@/lib/offers";
+import { Suggestion } from "@/components/Offers";
 
 export default async function Sent({ params }: { params: Promise<{ id: string }> }) {
   const client = await requireClient();
@@ -18,6 +20,7 @@ export default async function Sent({ params }: { params: Promise<{ id: string }>
   if (!r) notFound();
   const owner = r.ownerId ? (await teamMap(db)).get(r.ownerId) : undefined;
   const who = firstName(owner?.name) || "Your team";
+  const suggestion = client.offersOn && (await offersLive()) ? await suggestionFor(client, r) : null;
   return (
     <div className="sent">
       <div className="bigcheck">✓</div>
@@ -34,6 +37,7 @@ export default async function Sent({ params }: { params: Promise<{ id: string }>
           We&apos;ll email {client.loginEmail} when there&apos;s news. You can also check back here any time.
         </p>
       </div>
+      {suggestion && <Suggestion s={suggestion} requestId={r.id} />}
       <div className="row" style={{ justifyContent: "center" }}>
         <Link className="btn" href={`/requests/${r.id}`}>
           View request

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { makeResetLink, saveClient, saveClientEmails, saveTeamMember, type AdminState } from "@/app/admin-actions";
+import { makeResetLink, saveClient, saveClientEmails, saveClientServices, saveTeamMember, type AdminState } from "@/app/admin-actions";
 import { FormError, SubmitButton } from "@/components/forms";
 
 /** A one-time sign-in link, shown once right after it's made. */
@@ -190,6 +190,49 @@ export function ClientEmailsForm({ client }: { client: { id: string; name: strin
       </label>
       <div>
         <SubmitButton className="btn sm" pendingText="Checking GHL…">Save email settings</SubmitButton>
+      </div>
+    </form>
+  );
+}
+
+const SVC: [string, string][] = [["web", "Website care"], ["social", "Social media"], ["seo", "Google & SEO"], ["ads", "Ads"]];
+
+export function ClientServicesForm({
+  client, preview, live,
+}: {
+  client: { id: string; name: string; services: string; offersOn: boolean };
+  preview: string[];
+  live: boolean;
+}) {
+  const [state, action] = useActionState(saveClientServices, undefined);
+  let have: string[] = [];
+  try { have = JSON.parse(client.services); } catch {}
+  return (
+    <form action={action} className="stack" style={{ gap: 10, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+      <b>Services and offers</b>
+      <FormError state={state} />
+      {state?.ok && <div className="alert ok">{state.ok}</div>}
+      <input type="hidden" name="id" value={client.id} />
+      <div className="row" style={{ gap: 14 }}>
+        {SVC.map(([k, label]) => (
+          <label className="check-row" key={k} style={{ margin: 0 }}>
+            <input type="checkbox" name={`svc_${k}`} defaultChecked={have.includes(k)} /> {label}
+          </label>
+        ))}
+      </div>
+      <label className="check-row">
+        <input type="checkbox" name="offersOn" defaultChecked={client.offersOn} /> Show {client.name} offers for services they don&apos;t have
+      </label>
+      <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        {!client.offersOn
+          ? "Offers are off for this client."
+          : preview.length
+            ? `Would be offered: ${preview.map((k) => SVC.find((s) => s[0] === k)?.[1]).join(", ")}.`
+            : "Nothing to offer right now: they have everything else, or answered an offer in the last 90 days."}{" "}
+        {!live && "Clients don't see offers yet (the Hub-wide switch is off until the wording is approved)."}
+      </p>
+      <div>
+        <SubmitButton className="btn sm" pendingText="Saving…">Save services</SubmitButton>
       </div>
     </form>
   );

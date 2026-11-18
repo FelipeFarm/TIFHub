@@ -30,6 +30,10 @@ export const clients = sqliteTable("clients", {
   // The GHL contact that gets this client's Hub emails, and the switch for sending them (off until someone turns it on).
   notifyEmail: text("notify_email"),
   emailsOn: integer("emails_on", { mode: "boolean" }).notNull().default(false),
+  // Services they pay for, as a JSON list of keys (web, social, seo, ads). Set by the team in Admin.
+  services: text("services").notNull().default("[]"),
+  // Offers for other services. Clients only see them when OFFERS_LIVE is on for the whole Hub.
+  offersOn: integer("offers_on", { mode: "boolean" }).notNull().default(true),
   // Deactivated clients can't sign in; their requests stay for the record.
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   createdAt: integer("created_at").notNull(),
@@ -66,6 +70,23 @@ export const loginAttempts = sqliteTable("login_attempts", {
   fails: integer("fails").notNull(),
   firstFailAt: integer("first_fail_at").notNull(),
   lockedUntil: integer("locked_until"),
+});
+
+/**
+ * Client reactions to offers. action: interested | dismissed.
+ * Interest shows in the team inbox until someone marks it followed up.
+ */
+export const offerEvents = sqliteTable("offer_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  clientId: text("client_id").notNull(),
+  service: text("service").notNull(),
+  action: text("action").notNull(),
+  trigger: text("trigger"), // home | after_request
+  requestId: integer("request_id"),
+  askedBy: text("asked_by"),
+  at: integer("at").notNull(),
+  handledAt: integer("handled_at"),
+  handledBy: text("handled_by"),
 });
 
 /** Who changed access, and when: accounts added, deactivated, links made, passwords set, lockouts. */
@@ -190,4 +211,5 @@ export type Message = typeof messages.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
 export type AuditEntry = typeof auditLog.$inferSelect;
+export type OfferEvent = typeof offerEvents.$inferSelect;
 export type ApprovalItem = typeof approvalItems.$inferSelect;

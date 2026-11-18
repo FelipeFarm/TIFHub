@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth";
 import { sameSecret, setupOpen, setupSecret } from "@/lib/setup";
 import { findContactByEmail, ghlConfig } from "@/lib/ghl";
+import { OFFER_SERVICES, SERVICE_NAMES } from "@/lib/offers";
 import { fmtDayTime } from "@/lib/time";
 
 export type AdminState = { error?: string; ok?: string; link?: string; linkFor?: string; linkExpires?: string } | undefined;
@@ -276,4 +277,21 @@ export async function saveClientEmails(_: AdminState, fd: FormData): Promise<Adm
       ? `Emails are on. ${c.name}'s updates go to ${notifyEmail}${found ? ` (${found} in GHL)` : ""}.`
       : notifyEmail ? `Linked to ${notifyEmail}${found ? ` (${found} in GHL)` : ""}. Emails are off.` : "Saved. Emails are off.",
   };
+}
+
+/* ---------------------------------------------------------- services/offers */
+
+/** Which Idea Farm services this client has, and whether they can be offered others. */
+export async function saveClientServices(_: AdminState, fd: FormData): Promise<AdminState> {
+  const me = await requireAdmin();
+  const id = str(fd, "id", 40);
+  const services = OFFER_SERVICES.filter((s) => fd.get(`svc_${s}`) === "on");
+  const offersOn = fd.get("offersOn") === "on";
+  const db = await getDb();
+  const c = await db.query.clients.findFirst({ where: eq(clients.id, id) });
+  if (!c) return { error: "Client not found." };
+  await db.update(clients).set({ services: JSON.stringify(services), offersOn }).where(eq(clients.id, id));
+  await audit(me.name, "set client services", c.name, `${services.map((s) => SERVICE_NAMES[s]).join(", ") || "none"} · offers ${offersOn ? "on" : "off"}`);
+  revalidatePath("/team/admin");
+  return { ok: "Saved." };
 }

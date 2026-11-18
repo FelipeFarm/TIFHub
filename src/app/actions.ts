@@ -3,15 +3,16 @@
 import { redirect } from "next/navigation";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { approvalItems, approvals, clients, messages, outbox, requests, team } from "@/db/schema";
+import { approvalItems, approvals, clients, messages, offerEvents, outbox, requests, team } from "@/db/schema";
 import {
-  audit, burnTime, clearFailures, createSession, destroySession, isLockedOut, recordFailure, rememberName, requireClient,
+  audit, burnTime, clearFailures, createSession, destroySession, isLockedOut, recordFailure, rememberName, rememberedName, requireClient,
   requireTeam, verifyPassword,
 } from "@/lib/auth";
 import { CHANNELS, NEED_ACTIONS, SERVICES, STATUS, URGENCY, type ServiceKey } from "@/lib/constants";
 import { checkFiles, filesFrom, saveFiles } from "@/lib/files";
 import { emailClient, flushGhlNow, flushMonday, flushSlack, queue } from "@/lib/outbox";
-import { requestAlert, reviewAlert } from "@/lib/slack";
+import { interestAlert, requestAlert, reviewAlert } from "@/lib/slack";
+import { SERVICE_NAMES, availableOffers, isOfferService, offersLive } from "@/lib/offers";
 import { fmtDateInput, replyByFor, replyByLabel } from "@/lib/time";
 
 export type FormState = { error?: string } | undefined;
@@ -401,4 +402,59 @@ export async function retryOutbox(fd: FormData) {
     await flushGhlNow();
   }
   redirect("/team/outbox?retried=1");
+}
+
+/* ---------------------------------------------------------------- offers */
+
+/** Client clicked "I'm interested" on an offer. Only services actually on offer to them are accepted. */
+export async function clientInterested(fd: FormData) {
+  const client = await requireClient();
+  const service = str(fd, "service", 20);
+  const trigger = str(fd, "trigger", 20) === "after_request" ? "after_request" : "home";
+  const requestId = Number(fd.get("requestId")) || null;
+  if (!isOfferService(service) || !(await offersVisible(client)) || !(await availableOffers(client)).includes(service)) redirect("/");
+  const db = await getDb();
+  const askedBy = (await rememberedName()) || null;
+  let fromRequest: string | null = null;
+  if (requestId) {
+    const r = await db.query.requests.findFirst({ where: and(eq(requests.id, requestId), eq(requests.clientId, client.id)) });
+    fromRequest = r?.title ?? null;
+  }
+  await db.insert(offerEvents).values({ clientId: client.id, service, action: "interested", trigger, requestId: fromRequest ? requestId : null, askedBy, at: Date.now() });
+  await queue("slack", "alert", `Slack: ${client.name} is interested in ${SERVICE_NAMES[service]}`, {
+    text: await interestAlert(client, SERVICE_NAMES[service], askedBy, fromRequest),
+  });
+  if (client.ghlContactId) {
+    await queue("ghl", "tag", `GHL: tag ${client.name} "hub-interest-${service}"`, { contactId: client.ghlContactId, tag: `hub-interest-${service}` });
+  }
+  redirect(`/interested?service=${service}`);
+}
+
+/** Client clicked "Not now" / "No thanks": hide that offer for 90 days. */
+export async function dismissOffer(fd: FormData) {
+  const client = await requireClient();
+  const service = str(fd, "service", 20);
+  const back = str(fd, "back", 100);
+  if (isOfferService(service)) {
+    const db = await getDb();
+    await db.insert(offerEvents).values({
+      clientId: client.id, service, action: "dismissed", trigger: str(fd, "trigger", 20) || "home",
+      requestId: Number(fd.get("requestId")) || null, askedBy: (await rememberedName()) || null, at: Date.now(),
+    });
+  }
+  redirect(/^\/[a-z0-9/]*$/i.test(back) ? back : "/");
+}
+
+/** Team: mark a client's interest as followed up, so it leaves the inbox. */
+export async function markInterestHandled(fd: FormData) {
+  const me = await requireTeam();
+  const id = Number(fd.get("id"));
+  const db = await getDb();
+  await db.update(offerEvents).set({ handledAt: Date.now(), handledBy: me.name }).where(eq(offerEvents.id, id));
+  redirect("/team");
+}
+
+/** Offers show when the Hub-wide switch is on, or always to an admin previewing (never to other clients). */
+async function offersVisible(client: { offersOn: boolean }) {
+  return client.offersOn && (await offersLive());
 }

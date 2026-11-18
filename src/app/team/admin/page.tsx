@@ -5,7 +5,8 @@ import { clients, team } from "@/db/schema";
 import { NO_PASSWORD, requireAdmin } from "@/lib/auth";
 import { listMondayUsers } from "@/lib/monday";
 import { setClientActive, setTeamActive } from "@/app/admin-actions";
-import { ClientEmailsForm, ClientForm, LinkButton, TeamForm } from "./AdminForms";
+import { ClientEmailsForm, ClientForm, ClientServicesForm, LinkButton, TeamForm } from "./AdminForms";
+import { availableOffers, offersLive } from "@/lib/offers";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,9 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
     tab === "team" ? listMondayUsers() : Promise.resolve([]),
   ]);
   const activeTeam = teamRows.filter((t) => t.active).map((t) => ({ id: t.id, name: t.name }));
+  const live = await offersLive();
+  const previews = new Map<string, string[]>();
+  if (tab === "clients") for (const c of clientRows.filter((x) => x.active)) previews.set(c.id, await availableOffers(c));
   const nameOf = new Map(teamRows.map((t) => [t.id, t.name]));
 
   return (
@@ -73,6 +77,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
                     {c.active && <ClientForm team={activeTeam} client={c} />}
                     {c.active && <LinkButton userType="client" id={c.id} waiting={waiting} />}
                     {c.active && <ClientEmailsForm client={c} />}
+                    {c.active && <ClientServicesForm client={c} preview={previews.get(c.id) ?? []} live={live} />}
                     <form action={setClientActive}>
                       <input type="hidden" name="id" value={c.id} />
                       <input type="hidden" name="active" value={c.active ? "0" : "1"} />

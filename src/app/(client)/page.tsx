@@ -8,6 +8,8 @@ import { openRequests, teamMap } from "@/lib/queries";
 import { clientLine, firstName } from "@/lib/sentences";
 import { fmtDateInput, fmtDay, replyByLabel } from "@/lib/time";
 import { initialsOf } from "@/components/ui";
+import { ServicesCard } from "@/components/Offers";
+import { availableOffers, offersLive, servicesOf } from "@/lib/offers";
 
 export default async function Home() {
   const client = await requireClient();
@@ -32,6 +34,9 @@ export default async function Home() {
   const lead = client.leadId ? people.get(client.leadId) : undefined;
   const backup = client.backupId ? people.get(client.backupId) : undefined;
   const turnTotal = yourTurn.length + sentApprovals.length;
+  // Offers stay hidden until the Hub-wide switch is on (Jose approves the wording first).
+  const live = client.offersOn && (await offersLive());
+  const offers = live ? await availableOffers(client) : [];
 
   return (
     <>
@@ -127,6 +132,7 @@ export default async function Home() {
               We answer every request within 1 business day{lead ? `. ${firstName(lead.name)} gets yours first.` : "."}
             </p>
           </div>
+          {live && <ServicesCard have={servicesOf(client)} offers={offers} />}
           {done.length > 0 && (
             <div className="card">
               <h2>Recently done</h2>

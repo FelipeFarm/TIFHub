@@ -1,29 +1,32 @@
 import Link from "next/link";
-import { ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { getDb } from "@/db";
-import { approvals, requests, type Request } from "@/db/schema";
+import { approvals, offerEvents, requests, type Request } from "@/db/schema";
 import { requireTeam } from "@/lib/auth";
 import { serviceLabel, typeLabel, URGENCY } from "@/lib/constants";
 import { teamMap } from "@/lib/queries";
 import { duration, fmtDateInput, replyByLabel } from "@/lib/time";
-import { assignOwner } from "@/app/actions";
+import { assignOwner, markInterestHandled } from "@/app/actions";
+import { SERVICE_NAMES, isOfferService } from "@/lib/offers";
 import { AssignSelect } from "./AssignSelect";
 
 export default async function Inbox({ searchParams }: { searchParams: Promise<{ who?: string; client?: string }> }) {
   const me = await requireTeam();
   const { who = "all", client: clientFilter } = await searchParams;
   const db = await getDb();
-  const [allReqs, allAppr, people, clientRows] = await Promise.all([
+  const [allReqs, allAppr, people, clientRows, allInterest] = await Promise.all([
     db.query.requests.findMany({ where: ne(requests.status, "done") }),
     db.query.approvals.findMany({ where: ne(approvals.status, "closed") }),
     teamMap(db),
     db.query.clients.findMany(),
+    db.query.offerEvents.findMany({ where: and(eq(offerEvents.action, "interested"), isNull(offerEvents.handledAt)) }),
   ]);
   const clientName = new Map(clientRows.map((c) => [c.id, c.name]));
   const keep = (clientId: string, ownerId: string | null) =>
     (!clientFilter || clientId === clientFilter) &&
     (who === "mine" ? ownerId === me.id : who === "unassigned" ? !ownerId : true);
   const reqs = allReqs.filter((r) => keep(r.clientId, r.ownerId));
+  const interest = allInterest.filter((e) => keep(e.clientId, clientRows.find((c) => c.id === e.clientId)?.leadId ?? null));
   const appr = allAppr.filter((a) => keep(a.clientId, a.ownerId));
   const now = Date.now();
 
@@ -178,6 +181,41 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
               <tr className="none">
                 <td colSpan={5}>Nothing new from clients.</td>
               </tr>
+            )}
+
+            {interest.length > 0 && (
+              <>
+                <tr className="grp">
+                  <td colSpan={5}>
+                    Interested in more <span>{interest.length}</span>
+                  </td>
+                </tr>
+                {interest.map((e) => (
+                  <tr key={`i${e.id}`}>
+                    <td>
+                      <b>{clientName.get(e.clientId)}</b>
+                      <small>{e.askedBy ?? ""}</small>
+                    </td>
+                    <td>
+                      Interested in <b>{isOfferService(e.service) ? SERVICE_NAMES[e.service] : e.service}</b>
+                      <small>
+                        {e.trigger === "after_request" ? "Clicked “Tell me more” after a request" : "From the Services card on their home"} ·{" "}
+                        {fmtDateInput(new Date(e.at).toISOString().slice(0, 10))}
+                      </small>
+                    </td>
+                    <td>
+                      <span className="pill prog">Sales</span>
+                    </td>
+                    <td>{(() => { const c = clientRows.find((x) => x.id === e.clientId); return c?.leadId ? people.get(c.leadId)?.name : "—"; })()}</td>
+                    <td>
+                      <form action={markInterestHandled}>
+                        <input type="hidden" name="id" value={e.id} />
+                        <button className="btn sm ghost">Followed up</button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </>
             )}
 
             <tr className="grp">

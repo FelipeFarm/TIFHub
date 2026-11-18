@@ -80,6 +80,7 @@ const threadOf = (r: Row) => (r.requestId ? `r${r.requestId}` : r.approvalId ? `
 export async function flushGhl(manual = false) {
   const cfg = await ghlConfig();
   if (!cfg) return;
+  await flushTags(cfg, manual);
   const db = await getDb();
   const now = Date.now();
   const waiting = await db.query.outbox.findMany({
@@ -154,6 +155,34 @@ export async function flushGhl(manual = false) {
         .update(outbox)
         .set({ status: "failed", error: String((e as Error).message ?? e).slice(0, 500) })
         .where(inArray(outbox.id, ids));
+    }
+  }
+}
+
+/**
+ * Tags on GHL contacts (e.g. "hub-interest-ads" when a client clicks "I'm interested").
+ * GHL can trigger its own workflow on that tag, like creating an opportunity in the sales pipeline.
+ */
+async function flushTags(cfg: Cfg, manual: boolean) {
+  const db = await getDb();
+  const rows = await db.query.outbox.findMany({
+    where: and(eq(outbox.target, "ghl"), eq(outbox.kind, "tag"), inArray(outbox.status, ["pending", "failed"])),
+    limit: 20,
+  });
+  for (const row of rows) {
+    if (!manual && row.status === "failed" && row.attempts >= 5) continue;
+    const claimed = await db
+      .update(outbox)
+      .set({ status: "sending", claimedAt: Date.now(), attempts: sql`${outbox.attempts} + 1` })
+      .where(and(eq(outbox.id, row.id), eq(outbox.status, row.status)))
+      .returning({ id: outbox.id });
+    if (!claimed.length) continue;
+    try {
+      const p = JSON.parse(row.payload) as { contactId: string; tag: string };
+      await call(cfg, "POST", `/contacts/${encodeURIComponent(p.contactId)}/tags`, { tags: [p.tag] });
+      await db.update(outbox).set({ status: "sent", sentAt: Date.now(), error: null }).where(eq(outbox.id, row.id));
+    } catch (e) {
+      await db.update(outbox).set({ status: "failed", error: String((e as Error).message ?? e).slice(0, 500) }).where(eq(outbox.id, row.id));
     }
   }
 }

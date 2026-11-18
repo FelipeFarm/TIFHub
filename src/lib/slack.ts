@@ -78,3 +78,14 @@ export async function deliverSlack(payload: { text: string }) {
   if (!res.ok) throw new Error(`Slack: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 100)}`);
   return "Posted to Slack";
 }
+
+export async function interestAlert(client: { name: string; leadId: string | null }, serviceName: string, who: string | null, fromRequest: string | null) {
+  const cfg = await slackConfig();
+  const hubUrl = cfg?.hubUrl ?? "https://tifhub.webflow.io";
+  const tag = await mentions([client.leadId]);
+  return [
+    `:raising_hand: *${slackEscape(client.name)}* is interested in *${serviceName}*${who ? ` (${slackEscape(who)})` : ""}`,
+    fromRequest ? `After asking for: ${slackEscape(fromRequest)}` : "From the Services card on their Hub home",
+    `<${hubUrl}/team|Open the Hub inbox>${tag ? ` · ${tag}` : ""}`,
+  ].join("\n");
+}
