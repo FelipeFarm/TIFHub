@@ -4,7 +4,7 @@
 import { getDb, getEnv } from "@/db";
 import { attachments, clients, messages, requests, team } from "@/db/schema";
 import { CHANNELS, SERVICES, type ServiceKey } from "./constants";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 const COL = {
   status: "color_mm97vm22",
@@ -187,4 +187,86 @@ export async function listMondayUsers(): Promise<{ id: string; name: string; ema
   } catch {
     return [];
   }
+}
+
+/* ------------------------------------------------------ monday → Hub */
+
+const HUB_STATUS: Record<string, string> = {
+  Received: "received",
+  "In progress": "in_progress",
+  "Waiting on client": "your_turn",
+  Done: "done",
+};
+// Columns that, when changed in monday, should update the Hub.
+export const WATCHED_COLUMNS = new Set<string>([COL.status, COL.owner, COL.happening, COL.need, COL.expected]);
+
+/**
+ * Pulls one item's current values from monday and applies them to its Hub request.
+ * Never trusts the webhook's own data: it only uses the item id, then reads monday with our token.
+ * Returns what changed (empty when nothing did, e.g. the echo of an update the Hub itself made).
+ */
+export async function pullItemFromMonday(itemId: string, mondayUserId?: string | null) {
+  const cfg = await mondayConfig();
+  if (!cfg) throw new Error("monday isn't connected");
+  const db = await getDb();
+  const req = await db.query.requests.findFirst({ where: eq(requests.mondayItemId, itemId) });
+  if (!req) return { changed: [] as string[], reason: "Not a Hub item" };
+
+  const data = await gql<{ items: { id: string; board: { id: string }; column_values: { id: string; text: string | null; value: string | null }[] }[] }>(
+    cfg,
+    `query ($ids: [ID!], $cols: [String!]) { items(ids: $ids) { id board { id } column_values(ids: $cols) { id text value } } }`,
+    { ids: [itemId], cols: [...WATCHED_COLUMNS] },
+  );
+  const item = data.items[0];
+  if (!item || item.board.id !== cfg.boardId) return { changed: [], reason: "Item not on the Hub Requests board" };
+  const col = (id: string) => item.column_values.find((c) => c.id === id);
+
+  const patch: Partial<typeof requests.$inferInsert> = {};
+  const changed: string[] = [];
+  const status = HUB_STATUS[col(COL.status)?.text ?? ""];
+  if (status && status !== req.status) {
+    patch.status = status;
+    patch.doneAt = status === "done" ? Date.now() : null;
+    changed.push(`status → ${col(COL.status)?.text}`);
+  }
+  const happening = (col(COL.happening)?.text ?? "").trim().slice(0, 160) || null;
+  if (happening !== (req.statusLine ?? null)) {
+    patch.statusLine = happening;
+    changed.push("what's happening");
+  }
+  const need = (col(COL.need)?.text ?? "").trim().slice(0, 300) || null;
+  const effectiveStatus = patch.status ?? req.status;
+  if (effectiveStatus === "your_turn" && need !== (req.needText ?? null)) {
+    patch.needText = need;
+    changed.push("what we need");
+  }
+  const expected = /^\d{4}-\d{2}-\d{2}$/.test(col(COL.expected)?.text ?? "") ? col(COL.expected)!.text : null;
+  if (expected !== (req.expected ?? null)) {
+    patch.expected = expected;
+    changed.push("expected date");
+  }
+  // Owner: only people the Hub knows (linked to a monday account), and only active ones.
+  let ownerIds: string[] = [];
+  try {
+    ownerIds = (JSON.parse(col(COL.owner)?.value ?? "{}").personsAndTeams ?? []).filter((p: { kind: string }) => p.kind === "person").map((p: { id: number }) => String(p.id));
+  } catch {}
+  if (ownerIds.length) {
+    const owner = await db.query.team.findFirst({ where: and(inArray(team.mondayUserId, ownerIds), eq(team.active, true)) });
+    if (owner && owner.id !== req.ownerId) {
+      patch.ownerId = owner.id;
+      changed.push(`owner → ${owner.name}`);
+    }
+  }
+  if (!changed.length) return { changed, reason: "Already up to date" };
+
+  const now = Date.now();
+  await db.update(requests).set({ ...patch, updatedAt: now }).where(eq(requests.id, req.id));
+  const who = mondayUserId ? (await db.query.team.findFirst({ where: eq(team.mondayUserId, mondayUserId) }))?.name : null;
+  if (patch.status) {
+    await db.insert(messages).values({
+      requestId: req.id, authorType: "system", authorName: who ?? "monday",
+      body: `${who ?? "Someone"} moved this to ${col(COL.status)?.text === "Waiting on client" ? "Your turn" : col(COL.status)?.text} in monday`, createdAt: now,
+    });
+  }
+  return { changed, reason: "Updated" };
 }

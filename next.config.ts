@@ -48,5 +48,7 @@ const nextConfig: NextConfig = {
 
 export default nextConfig;
 
-// Gives `next dev` access to the local D1 database and R2 bucket defined in wrangler.jsonc.
-initOpenNextCloudflareForDev();
+// Gives `next dev` access to the local D1 database and R2 bucket defined in wrangler.json.
+// Only while developing: on Webflow Cloud's build machine it would start a local database and can
+// fail with "database is locked" (SQLITE_BUSY).
+if (process.env.NODE_ENV === "development") initOpenNextCloudflareForDev();
