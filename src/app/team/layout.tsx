@@ -25,7 +25,8 @@ export default async function TeamLayout({ children }: { children: React.ReactNo
             prefixes: ["/team/requests"],
           },
           { href: "/team/approvals", label: "Approvals" },
-          { href: "/team/outbox", label: "Outbox (trial)" },
+          { href: "/team/outbox", label: "Outbox" },
+          ...(me.role === "admin" ? [{ href: "/team/admin", label: "Admin", prefixes: ["/team/admin"] }] : []),
         ]}
         who={me.name}
         whoSub="The Idea Farm"

@@ -1,15 +1,16 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { approvalItems, approvals, clients, messages, requests, team } from "@/db/schema";
+import { approvalItems, approvals, clients, messages, outbox, requests, team } from "@/db/schema";
 import {
-  createSession, destroySession, rememberName, requireClient, requireTeam, verifyPassword,
+  audit, burnTime, clearFailures, createSession, destroySession, isLockedOut, recordFailure, rememberName, requireClient,
+  requireTeam, verifyPassword,
 } from "@/lib/auth";
 import { CHANNELS, NEED_ACTIONS, SERVICES, STATUS, URGENCY, type ServiceKey } from "@/lib/constants";
 import { checkFiles, filesFrom, saveFiles } from "@/lib/files";
-import { queue } from "@/lib/outbox";
+import { flushMonday, queue } from "@/lib/outbox";
 import { replyByFor } from "@/lib/time";
 
 export type FormState = { error?: string } | undefined;
@@ -22,24 +23,40 @@ const titleFrom = (text: string) => {
   return first.length > 80 ? `${first.slice(0, 77).trimEnd()}…` : first;
 };
 
+/** Only an active team member can own a request; anything else is ignored. */
+async function activeOwner(id: string) {
+  if (!id) return null;
+  const db = await getDb();
+  const t = await db.query.team.findFirst({ where: and(eq(team.id, id), eq(team.active, true)) });
+  return t?.id ?? null;
+}
+
 /* ------------------------------------------------------------------ auth */
 
 export async function login(_: FormState, fd: FormData): Promise<FormState> {
   const email = str(fd, "email", 200).toLowerCase();
-  const password = String(fd.get("password") ?? "");
+  const password = String(fd.get("password") ?? "").slice(0, 200);
   const remember = fd.get("remember") === "on";
+  // Same message whether the account exists or not, so the form can't be used to find valid emails.
+  const wrong = { error: "That email and password don't match. Try again, or ask your Idea Farm contact for a new sign-in link." };
+  if (!email || !password) return wrong;
+  if (await isLockedOut(email)) {
+    await burnTime(password);
+    return { error: "Too many tries. Wait 15 minutes, or ask your Idea Farm contact for a new sign-in link." };
+  }
   const db = await getDb();
-  const member = await db.query.team.findFirst({ where: eq(team.email, email) });
-  if (member && (await verifyPassword(password, member.passwordHash))) {
-    await createSession("team", member.id, remember);
-    redirect("/team");
+  const member = await db.query.team.findFirst({ where: and(eq(team.email, email), eq(team.active, true)) });
+  const client = member ? null : await db.query.clients.findFirst({ where: and(eq(clients.loginEmail, email), eq(clients.active, true)) });
+  const account = member ?? client;
+  const ok = account ? await verifyPassword(password, account.passwordHash) : (await burnTime(password), false);
+  if (!ok || !account) {
+    await recordFailure(email);
+    return wrong;
   }
-  const client = await db.query.clients.findFirst({ where: eq(clients.loginEmail, email) });
-  if (client && (await verifyPassword(password, client.passwordHash))) {
-    await createSession("client", client.id, remember);
-    redirect("/");
-  }
-  return { error: "That email and password don't match. Try again, or call us and we'll reset it." };
+  await clearFailures(email);
+  await createSession(member ? "team" : "client", account.id, remember);
+  await audit(account.name, "signed in", member ? "team" : "client");
+  redirect(member ? "/team" : "/");
 }
 
 export async function logout() {
@@ -170,7 +187,7 @@ export async function teamReply(_: FormState, fd: FormData): Promise<FormState> 
       .where(eq(requests.id, id));
     await queue("ghl", "email_client", `Email client: new message from ${me.name} on "${req.title}"`, { requestId: id, from: me.name, body }, { requestId: id });
   }
-  await queue("monday", "add_update", `${internal ? "Internal note" : "Reply"} on monday item for "${req.title}"`, { requestId: id, internal, body }, { requestId: id });
+  await queue("monday", "add_update", `${internal ? "Internal note" : "Reply"} on monday item for "${req.title}"`, { requestId: id, internal, body, team: true, from: me.name }, { requestId: id });
   redirect(`/team/requests/${id}`);
 }
 
@@ -184,7 +201,7 @@ export async function updateRequest(_: FormState, fd: FormData): Promise<FormSta
   const status = oneOf(str(fd, "status"), Object.keys(STATUS) as (keyof typeof STATUS)[], "in_progress");
   const needText = str(fd, "needText", 300) || null;
   if (status === "your_turn" && !needText) return { error: "Say what you need from the client." };
-  const ownerId = str(fd, "ownerId", 40) || null;
+  const ownerId = await activeOwner(str(fd, "ownerId", 40));
   const notify = fd.get("notify") === "on";
   const now = Date.now();
 
@@ -208,11 +225,9 @@ export async function updateRequest(_: FormState, fd: FormData): Promise<FormSta
     await db.insert(messages).values({
       requestId: id, authorType: "system", authorName: me.name, body: `${me.name} moved this to ${STATUS[status]}`, createdAt: now,
     });
-    await queue("monday", "set_status", `Set monday status for "${req.title}" → ${STATUS[status]}`, { requestId: id, status }, { requestId: id });
   }
-  if (ownerId !== req.ownerId) {
-    await queue("monday", "set_owner", `Set monday owner for "${req.title}"`, { requestId: id, ownerId }, { requestId: id });
-  }
+  // One event carries the whole update (status, what's happening, expected date, owner).
+  await queue("monday", "update_item", `Update monday item for "${req.title}" (${STATUS[status]})`, { requestId: id, status, ownerId }, { requestId: id });
   if (notify) {
     await queue("ghl", "email_client", `Email client: "${req.title}" is now ${STATUS[status]}`, { requestId: id, status }, { requestId: id });
   }
@@ -222,7 +237,7 @@ export async function updateRequest(_: FormState, fd: FormData): Promise<FormSta
 export async function assignOwner(fd: FormData) {
   await requireTeam();
   const id = Number(fd.get("requestId"));
-  const ownerId = str(fd, "ownerId", 40) || null;
+  const ownerId = await activeOwner(str(fd, "ownerId", 40));
   const db = await getDb();
   await db.update(requests).set({ ownerId, updatedAt: Date.now() }).where(eq(requests.id, id));
   await queue("monday", "set_owner", `Set monday owner for request ${id}`, { requestId: id, ownerId }, { requestId: id });
@@ -232,7 +247,7 @@ export async function assignOwner(fd: FormData) {
 export async function logRequest(_: FormState, fd: FormData): Promise<FormState> {
   const me = await requireTeam();
   const db = await getDb();
-  const client = await db.query.clients.findFirst({ where: eq(clients.id, str(fd, "clientId", 40)) });
+  const client = await db.query.clients.findFirst({ where: and(eq(clients.id, str(fd, "clientId", 40)), eq(clients.active, true)) });
   if (!client) return { error: "Pick a client." };
   const service = oneOf(str(fd, "service"), Object.keys(SERVICES) as ServiceKey[], "other");
   const urgency = oneOf(str(fd, "urgency"), Object.keys(URGENCY) as (keyof typeof URGENCY)[], "no_rush");
@@ -241,7 +256,7 @@ export async function logRequest(_: FormState, fd: FormData): Promise<FormState>
   const askedBy = str(fd, "askedBy", 80);
   if (!details) return { error: "Paste or summarize what they asked." };
   if (!askedBy) return { error: "Who asked?" };
-  const ownerId = str(fd, "ownerId", 40) || client.leadId;
+  const ownerId = (await activeOwner(str(fd, "ownerId", 40))) ?? (await activeOwner(client.leadId ?? ""));
   const now = Date.now();
   const [req] = await db
     .insert(requests)
@@ -264,7 +279,7 @@ export async function logRequest(_: FormState, fd: FormData): Promise<FormState>
 export async function sendApproval(_: FormState, fd: FormData): Promise<FormState> {
   const me = await requireTeam();
   const db = await getDb();
-  const client = await db.query.clients.findFirst({ where: eq(clients.id, str(fd, "clientId", 40)) });
+  const client = await db.query.clients.findFirst({ where: and(eq(clients.id, str(fd, "clientId", 40)), eq(clients.active, true)) });
   if (!client) return { error: "Pick a client." };
   const title = str(fd, "title", 120);
   if (!title) return { error: "Give it a name, like “December social posts”." };
@@ -332,4 +347,17 @@ export async function closeApproval(fd: FormData) {
   const db = await getDb();
   await db.update(approvals).set({ status: "closed" }).where(eq(approvals.id, Number(fd.get("approvalId"))));
   redirect("/team/approvals");
+}
+
+/** Outbox: try failed or waiting monday events again, oldest first, one request at a time. */
+export async function retryOutbox(fd: FormData) {
+  await requireTeam();
+  const db = await getDb();
+  const only = Number(fd.get("requestId")) || null;
+  const rows = await db.query.outbox.findMany({
+    where: and(eq(outbox.target, "monday"), inArray(outbox.status, ["pending", "failed", "sending"])),
+  });
+  const ids = [...new Set(rows.map((r) => r.requestId))].filter((id) => only === null || id === only);
+  for (const id of ids) await flushMonday(id);
+  redirect("/team/outbox?retried=1");
 }

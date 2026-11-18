@@ -23,7 +23,7 @@ const logins = [];
 const account = (label, email) => { const p = pw(); logins.push(`${label.padEnd(22)} ${email.padEnd(30)} ${p}`); return hash(p); };
 
 const team = [
-  { id: "t_marisol", name: "Marisol Reyes", initials: "MR", email: "marisol@ideafarm.test", password_hash: account("Team: Marisol", "marisol@ideafarm.test"), role: "account_lead" },
+  { id: "t_marisol", name: "Marisol Reyes", initials: "MR", email: "marisol@ideafarm.test", password_hash: account("Team: Marisol", "marisol@ideafarm.test"), role: "admin" },
   { id: "t_theo", name: "Theo Kim", initials: "TK", email: "theo@ideafarm.test", password_hash: account("Team: Theo", "theo@ideafarm.test"), role: "account_lead" },
 ];
 const clients = [

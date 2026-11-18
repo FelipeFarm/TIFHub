@@ -24,7 +24,7 @@ export function LoginForm() {
         Sign in
       </SubmitButton>
       <p className="muted" style={{ textAlign: "center", marginTop: 14 }}>
-        Forgot your password? Ask your account lead and we&apos;ll reset it.
+        Forgot your password? Ask your Idea Farm contact for a new sign-in link.
       </p>
     </form>
   );

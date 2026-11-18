@@ -119,7 +119,7 @@ export default async function TeamApprovals({ searchParams }: { searchParams: Pr
         </div>
 
         <aside>
-          <ApprovalBuilder clients={clientRows.map((c) => ({ id: c.id, name: c.name }))} defaultDue={todayInput(4)} />
+          <ApprovalBuilder clients={clientRows.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name }))} defaultDue={todayInput(4)} />
         </aside>
       </div>
     </>

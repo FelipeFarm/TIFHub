@@ -8,6 +8,27 @@
       "when": 1795019459542,
       "tag": "0000_left_doorman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1795029328553,
+      "tag": "0001_typical_vance_astro",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795029398954,
+      "tag": "0002_hesitant_mongu",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795033608095,
+      "tag": "0003_concerned_the_stranger",
+      "breakpoints": true
     }
   ]
 }

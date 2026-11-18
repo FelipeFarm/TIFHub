@@ -7,7 +7,11 @@ export const team = sqliteTable("team", {
   initials: text("initials").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  // admin: can add/deactivate clients and team and make login links. account_lead: everything else.
   role: text("role").notNull().default("account_lead"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  // monday user id, so Owner can be set on the Hub Requests board.
+  mondayUserId: text("monday_user_id"),
 });
 
 /** One row per client company. One shared login per company. */
@@ -21,14 +25,53 @@ export const clients = sqliteTable("clients", {
   // Filled in during step 4 (monday + GHL connection).
   mondayGroupId: text("monday_group_id"),
   ghlContactId: text("ghl_contact_id"),
+  // Deactivated clients can't sign in; their requests stay for the record.
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
   createdAt: integer("created_at").notNull(),
 });
 
+/** id = SHA-256 of the cookie value, so a copy of the database can't be used to sign in. */
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey(),
   userType: text("user_type").notNull(), // "client" | "team"
   userId: text("user_id").notNull(),
   expiresAt: integer("expires_at").notNull(),
+  createdAt: integer("created_at").notNull().default(0),
+});
+
+/**
+ * One-time links to set a password (new account or reset). Passwords are never chosen,
+ * shown or sent by the team: the person sets their own through this link.
+ * id = SHA-256 of the token in the link. purpose: invite | reset.
+ */
+export const loginLinks = sqliteTable("login_links", {
+  id: text("id").primaryKey(),
+  userType: text("user_type").notNull(),
+  userId: text("user_id").notNull(),
+  purpose: text("purpose").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: integer("created_at").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  usedAt: integer("used_at"),
+});
+
+/** Failed sign-ins per email and per network address, for lockouts. */
+export const loginAttempts = sqliteTable("login_attempts", {
+  key: text("key").primaryKey(),
+  fails: integer("fails").notNull(),
+  firstFailAt: integer("first_fail_at").notNull(),
+  lockedUntil: integer("locked_until"),
+});
+
+/** Who changed access, and when: accounts added, deactivated, links made, passwords set, lockouts. */
+export const auditLog = sqliteTable("audit_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  at: integer("at").notNull(),
+  actor: text("actor").notNull(),
+  action: text("action").notNull(),
+  target: text("target"),
+  detail: text("detail"),
+  ip: text("ip"),
 });
 
 /**
@@ -127,6 +170,11 @@ export const outbox = sqliteTable("outbox", {
   summary: text("summary").notNull(),
   payload: text("payload").notNull(),
   createdAt: integer("created_at").notNull(),
+  // pending | sending | sent | failed | skipped
+  status: text("status").notNull().default("pending"),
+  error: text("error"),
+  attempts: integer("attempts").notNull().default(0),
+  claimedAt: integer("claimed_at"),
   sentAt: integer("sent_at"),
 });
 
@@ -136,4 +184,5 @@ export type Request = typeof requests.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
+export type AuditEntry = typeof auditLog.$inferSelect;
 export type ApprovalItem = typeof approvalItems.$inferSelect;

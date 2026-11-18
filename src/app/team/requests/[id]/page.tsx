@@ -71,7 +71,7 @@ export default async function TeamRequest({
               needAction: r.needAction,
               ownerId: r.ownerId,
             }}
-            team={[...people.values()].map((t) => ({ id: t.id, name: t.name }))}
+            team={[...people.values()].filter((t) => t.active).map((t) => ({ id: t.id, name: t.name }))}
             replyByText={rb.text}
           />
           {files.length > 0 && (

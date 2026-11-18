@@ -22,8 +22,8 @@ export default async function LogPage() {
       </p>
       <LogForm
         me={me.id}
-        clients={clientRows.map((c) => ({ id: c.id, name: c.name, leadId: c.leadId }))}
-        team={[...people.values()].map((t) => ({ id: t.id, name: t.name }))}
+        clients={clientRows.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name, leadId: c.leadId }))}
+        team={[...people.values()].filter((t) => t.active).map((t) => ({ id: t.id, name: t.name }))}
       />
     </div>
   );

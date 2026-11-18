@@ -35,7 +35,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
   const waiting = reqs.filter((r) => r.firstReplyAt && !r.clientRepliedAt && r.status === "your_turn");
   const waitingAppr = appr.filter((a) => a.status === "sent");
   const late = needsReply.filter((r) => r.replyBy < now).length;
-  const team = [...people.values()];
+  const team = [...people.values()].filter((t) => t.active);
 
   const askedCell = (r: Request) => (
     <td>
