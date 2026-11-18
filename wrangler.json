@@ -9,7 +9,7 @@
   ],
   "vars": {
     "MONDAY_BOARD_ID": "18440599608",
-    "HUB_URL": "https://hub.theideafarm.com"
+    "HUB_URL": "https://tifhub.webflow.io"
   },
   "assets": {
     "directory": ".open-next/assets",

@@ -15,7 +15,7 @@ export async function slackConfig() {
   // (Local tests may point at this computer.)
   const okHost = /^https:\/\/hooks\.slack\.com\/services\//.test(url) || (process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(url));
   if (!okHost) return null;
-  return { url, hubUrl: (env.HUB_URL || "https://hub.theideafarm.com").replace(/\/$/, "") };
+  return { url, hubUrl: (env.HUB_URL || "https://tifhub.webflow.io").replace(/\/$/, "") };
 }
 
 /** Text from clients goes into Slack as plain text: no @channel, no fake links, no formatting tricks. */
@@ -39,7 +39,7 @@ type RequestLike = { id: number; clientId: string; title: string; service: strin
 /** Builds the alert text. Who gets @mentioned: the owner (or Account Lead); urgent ones also the backup. */
 export async function requestAlert(kind: "new" | "reply", r: RequestLike, who?: string) {
   const cfg = await slackConfig();
-  const hubUrl = cfg?.hubUrl ?? "https://hub.theideafarm.com";
+  const hubUrl = cfg?.hubUrl ?? "https://tifhub.webflow.io";
   const db = await getDb();
   const client = await db.query.clients.findFirst({ where: eq(clients.id, r.clientId) });
   const urgent = r.urgency === "urgent";
@@ -58,7 +58,7 @@ export async function requestAlert(kind: "new" | "reply", r: RequestLike, who?: 
 
 export async function reviewAlert(a: { id: number; clientId: string; title: string; ownerId: string | null }, who: string, approved: number, changes: number) {
   const cfg = await slackConfig();
-  const hubUrl = cfg?.hubUrl ?? "https://hub.theideafarm.com";
+  const hubUrl = cfg?.hubUrl ?? "https://tifhub.webflow.io";
   const db = await getDb();
   const client = await db.query.clients.findFirst({ where: eq(clients.id, a.clientId) });
   const tag = await mentions([a.ownerId ?? client?.leadId]);

@@ -21,7 +21,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function hubUrl() {
   const env = (await getEnv()) as unknown as Record<string, string | undefined>;
-  return (env.HUB_URL || "https://hub.theideafarm.com").replace(/\/$/, "");
+  return (env.HUB_URL || "https://tifhub.webflow.io").replace(/\/$/, "");
 }
 
 async function linkState(userType: "client" | "team", id: string, purpose: "invite" | "reset", who: string, by: string): Promise<AdminState> {

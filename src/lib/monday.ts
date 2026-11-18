@@ -42,7 +42,7 @@ export async function mondayConfig(): Promise<MondayConfig | null> {
   return {
     token: env.MONDAY_API_TOKEN,
     boardId: env.MONDAY_BOARD_ID,
-    hubUrl: (env.HUB_URL || "https://hub.theideafarm.com").replace(/\/$/, ""),
+    hubUrl: (env.HUB_URL || "https://tifhub.webflow.io").replace(/\/$/, ""),
     prefix: env.MONDAY_ITEM_PREFIX || "",
   };
 }
