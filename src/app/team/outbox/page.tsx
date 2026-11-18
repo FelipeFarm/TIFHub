@@ -5,12 +5,13 @@ import { outbox } from "@/db/schema";
 import { requireTeam } from "@/lib/auth";
 import { mondayConfig } from "@/lib/monday";
 import { slackConfig } from "@/lib/slack";
+import { ghlConfig } from "@/lib/ghl";
 import { ago } from "@/lib/time";
 import { retryOutbox } from "@/app/actions";
 
 const STATE: Record<string, { label: string; cls: string }> = {
   sent: { label: "Sent", cls: "done" },
-  pending: { label: "Waiting", cls: "rec" },
+  pending: { label: "Waiting", cls: "rec" }, // GHL: held to merge with other updates on the same request
   sending: { label: "Sending…", cls: "prog" },
   failed: { label: "Didn't send", cls: "you" },
   skipped: { label: "Not sent", cls: "" },
@@ -19,13 +20,14 @@ const STATE: Record<string, { label: string; cls: string }> = {
 export default async function Outbox({ searchParams }: { searchParams: Promise<{ retried?: string }> }) {
   await requireTeam();
   const db = await getDb();
-  const [rows, cfg, slack] = await Promise.all([
+  const [rows, cfg, slack, ghl] = await Promise.all([
     db.query.outbox.findMany({ orderBy: [desc(outbox.createdAt)], limit: 200 }),
     mondayConfig(),
     slackConfig(),
+    ghlConfig(),
   ]);
   const stuck = rows.filter(
-    (r) => ((r.target === "monday" && cfg) || (r.target === "slack" && slack)) && (r.status === "failed" || r.status === "pending"),
+    (r) => ((r.target === "monday" && cfg) || (r.target === "slack" && slack) || (r.target === "ghl" && ghl)) && r.status === "failed",
   ).length;
 
   return (
@@ -33,7 +35,7 @@ export default async function Outbox({ searchParams }: { searchParams: Promise<{
       <h1>Outbox</h1>
       <p className="sub">
         Everything the Hub sends out. monday: {cfg ? <b>connected</b> : <b>not connected</b>} · Slack alerts:{" "}
-        {slack ? <b>connected</b> : <b>not connected</b>} · GHL client emails: <b>not connected yet</b> (they wait here).
+        {slack ? <b>connected</b> : <b>not connected</b>} · GHL client emails: {ghl ? <b>connected</b> : <b>not connected</b>} (only for clients with emails turned on in Admin; several updates on one request within 10 minutes go out as one email).
       </p>
       {(await searchParams).retried && <div className="alert ok">Tried again. Check the list below.</div>}
       {stuck > 0 && (
@@ -56,7 +58,7 @@ export default async function Outbox({ searchParams }: { searchParams: Promise<{
           </thead>
           <tbody>
             {rows.map((r) => {
-              const notConnected = r.status === "pending" && (r.target === "ghl" || (r.target === "slack" && !slack) || (r.target === "monday" && !cfg));
+              const notConnected = r.status === "pending" && ((r.target === "ghl" && !ghl) || (r.target === "slack" && !slack) || (r.target === "monday" && !cfg));
               const st = notConnected ? { label: "Not connected", cls: "" } : STATE[r.status] ?? STATE.pending;
               return (
                 <tr key={r.id}>

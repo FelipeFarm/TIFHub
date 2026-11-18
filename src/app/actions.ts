@@ -10,9 +10,9 @@ import {
 } from "@/lib/auth";
 import { CHANNELS, NEED_ACTIONS, SERVICES, STATUS, URGENCY, type ServiceKey } from "@/lib/constants";
 import { checkFiles, filesFrom, saveFiles } from "@/lib/files";
-import { flushMonday, flushSlack, queue } from "@/lib/outbox";
+import { emailClient, flushGhlNow, flushMonday, flushSlack, queue } from "@/lib/outbox";
 import { requestAlert, reviewAlert } from "@/lib/slack";
-import { replyByFor } from "@/lib/time";
+import { fmtDateInput, replyByFor, replyByLabel } from "@/lib/time";
 
 export type FormState = { error?: string } | undefined;
 
@@ -23,6 +23,15 @@ const titleFrom = (text: string) => {
   const first = text.split(/\n|(?<=[.!?])\s/)[0].trim();
   return first.length > 80 ? `${first.slice(0, 77).trimEnd()}…` : first;
 };
+
+/** First name of a team member, for client emails ("Marisol will reply by…"). */
+async function firstNameOf(id: string | null) {
+  if (!id) return "";
+  const db = await getDb();
+  const t = await db.query.team.findFirst({ where: eq(team.id, id) });
+  return t?.name.split(" ")[0] ?? "";
+}
+const replyByText = (ms: number) => replyByLabel(ms).text.replace(/^(Today|Tomorrow)/, (w) => w.toLowerCase());
 
 /** Only an active team member can own a request; anything else is ignored. */
 async function activeOwner(id: string) {
@@ -99,7 +108,10 @@ export async function createRequest(_: FormState, fd: FormData): Promise<FormSta
   await saveFiles(files, { clientId: client.id, requestId: req.id, messageId: msg.id });
   await rememberName(askedBy);
   await queue("monday", "create_item", `Create item "${req.title}" for ${client.name}`, { request: req, files: files.length }, { requestId: req.id });
-  await queue("ghl", "email_client", `Confirmation email to ${client.name}: "We got your request"`, { to: client.loginEmail, askedBy }, { requestId: req.id });
+  await emailClient({
+    kind: "received", clientId: client.id, title: req.title, status: STATUS.received, path: `/requests/${req.id}`,
+    message: `${(await firstNameOf(req.ownerId)) || "Your team"} will reply by ${replyByText(req.replyBy)}.`,
+  }, { requestId: req.id });
   await queue("slack", "alert", `Slack: new request from ${client.name}`, { text: await requestAlert("new", req) }, { requestId: req.id });
   redirect(`/sent/${req.id}`);
 }
@@ -190,7 +202,10 @@ export async function teamReply(_: FormState, fd: FormData): Promise<FormState> 
       .update(requests)
       .set({ firstReplyAt: req.firstReplyAt ?? now, clientRepliedAt: null, updatedAt: now })
       .where(eq(requests.id, id));
-    await queue("ghl", "email_client", `Email client: new message from ${me.name} on "${req.title}"`, { requestId: id, from: me.name, body }, { requestId: id });
+    await emailClient({
+      kind: "message", clientId: req.clientId, title: req.title, status: STATUS[req.status as keyof typeof STATUS] ?? "", path: `/requests/${id}`,
+      message: `${me.name.split(" ")[0]} wrote: ${body || "We sent you files."}`,
+    }, { requestId: id });
   }
   await queue("monday", "add_update", `${internal ? "Internal note" : "Reply"} on monday item for "${req.title}"`, { requestId: id, internal, body, team: true, from: me.name }, { requestId: id });
   redirect(`/team/requests/${id}`);
@@ -234,7 +249,15 @@ export async function updateRequest(_: FormState, fd: FormData): Promise<FormSta
   // One event carries the whole update (status, what's happening, expected date, owner).
   await queue("monday", "update_item", `Update monday item for "${req.title}" (${STATUS[status]})`, { requestId: id, status, ownerId }, { requestId: id });
   if (notify) {
-    await queue("ghl", "email_client", `Email client: "${req.title}" is now ${STATUS[status]}`, { requestId: id, status }, { requestId: id });
+    const statusLine = str(fd, "statusLine", 160);
+    const expected = str(fd, "expected", 10);
+    const message =
+      status === "your_turn" ? (needText ?? "")
+      : status === "done" ? "All done. Something not right? Reply in the Hub and we'll reopen it."
+      : [statusLine, expected ? `Expected ${fmtDateInput(expected)}.` : ""].filter(Boolean).join(" ") || "We're on it.";
+    await emailClient({
+      kind: status === "your_turn" ? "need" : "status", clientId: req.clientId, title: req.title, status: STATUS[status], path: `/requests/${id}`, message,
+    }, { requestId: id });
   }
   redirect(`/team/requests/${id}?saved=1`);
 }
@@ -276,7 +299,10 @@ export async function logRequest(_: FormState, fd: FormData): Promise<FormState>
   ]);
   await queue("monday", "create_item", `Create item "${req.title}" for ${client.name}`, { request: req }, { requestId: req.id });
   if (fd.get("notify") === "on") {
-    await queue("ghl", "email_client", `Email ${client.name}: "We've added this to your Client Hub"`, { requestId: req.id, askedBy }, { requestId: req.id });
+    await emailClient({
+      kind: "received", clientId: client.id, title: req.title, status: STATUS.received, path: `/requests/${req.id}`,
+      message: `We've added your request from ${CHANNELS[channel].toLowerCase()} to your Client Hub, so you can follow it there. ${(await firstNameOf(ownerId)) || "Your team"} will reply by ${replyByText(req.replyBy)}.`,
+    }, { requestId: req.id });
   }
   redirect(`/team/requests/${req.id}`);
 }
@@ -315,7 +341,10 @@ export async function sendApproval(_: FormState, fd: FormData): Promise<FormStat
       whenLabel: it.when || null, imageKey: saved?.key ?? null,
     });
   }
-  await queue("ghl", "email_client", `Email ${client.name}: "${title}" is ready to approve`, { approvalId: appr.id }, { approvalId: appr.id });
+  await emailClient({
+    kind: "review", clientId: client.id, title, status: "Ready to review", path: `/approvals/${appr.id}`,
+    message: [appr.note ?? "", appr.due ? `Please approve or ask for changes by ${fmtDateInput(appr.due)}.` : ""].filter(Boolean).join(" "),
+  }, { approvalId: appr.id });
   redirect("/team/approvals?sent=1");
 }
 
@@ -343,7 +372,10 @@ export async function resendItem(fd: FormData) {
     })
     .where(eq(approvalItems.id, id));
   await db.update(approvals).set({ status: "sent" }).where(eq(approvals.id, appr.id));
-  await queue("ghl", "email_client", `Email client: updated item in "${appr.title}" ready to approve`, { approvalId: appr.id, itemId: id }, { approvalId: appr.id });
+  await emailClient({
+    kind: "review", clientId: appr.clientId, title: appr.title, status: "Ready to review", path: `/approvals/${appr.id}`,
+    message: "We updated what you asked us to change. Take a look and approve it, or tell us what else to change.",
+  }, { approvalId: appr.id });
   redirect("/team/approvals");
 }
 
@@ -364,6 +396,9 @@ export async function retryOutbox(fd: FormData) {
   });
   const ids = [...new Set(rows.map((r) => r.requestId))].filter((id) => only === null || id === only);
   for (const id of ids) await flushMonday(id);
-  if (!only) await flushSlack(true);
+  if (!only) {
+    await flushSlack(true);
+    await flushGhlNow();
+  }
   redirect("/team/outbox?retried=1");
 }

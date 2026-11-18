@@ -12,6 +12,7 @@ import {
   isLockedOut, makeLoginLink, passwordProblem, recordFailure, requireAdmin,
 } from "@/lib/auth";
 import { sameSecret, setupOpen, setupSecret } from "@/lib/setup";
+import { findContactByEmail, ghlConfig } from "@/lib/ghl";
 import { fmtDayTime } from "@/lib/time";
 
 export type AdminState = { error?: string; ok?: string; link?: string; linkFor?: string; linkExpires?: string } | undefined;
@@ -237,4 +238,42 @@ export async function createFirstAdmin(_: AdminState, fd: FormData): Promise<Adm
   await audit(name, "first admin set up", email);
   const { token } = await makeLoginLink("team", id!, "invite", "setup page");
   redirect(`/set-password/${token}`);
+}
+
+/* ------------------------------------------------------------ client emails */
+
+/** Links a client to the GHL contact that gets their Hub emails, and turns emails on or off. */
+export async function saveClientEmails(_: AdminState, fd: FormData): Promise<AdminState> {
+  const me = await requireAdmin();
+  const id = str(fd, "id", 40);
+  const notifyEmail = str(fd, "notifyEmail").toLowerCase() || null;
+  const emailsOn = fd.get("emailsOn") === "on";
+  const db = await getDb();
+  const c = await db.query.clients.findFirst({ where: eq(clients.id, id) });
+  if (!c) return { error: "Client not found." };
+  if (notifyEmail && !EMAIL.test(notifyEmail)) return { error: "That email doesn't look right." };
+  if (emailsOn && !notifyEmail) return { error: "Add the GHL contact's email before turning emails on." };
+
+  let ghlContactId: string | null = null;
+  let found = "";
+  if (notifyEmail) {
+    if (!(await ghlConfig())) return { error: "GHL isn't connected on this Hub yet, so the contact can't be checked." };
+    try {
+      const contact = await findContactByEmail(notifyEmail);
+      if (!contact) return { error: `There's no GHL contact with ${notifyEmail} in The Idea Farm sub-account. Add it in GHL first.` };
+      ghlContactId = contact.id;
+      found = contact.name;
+    } catch (e) {
+      return { error: `Couldn't reach GHL to check the contact: ${(e as Error).message}` };
+    }
+  }
+  await db.update(clients).set({ notifyEmail, ghlContactId, emailsOn: emailsOn && !!ghlContactId }).where(eq(clients.id, id));
+  if (c.emailsOn !== emailsOn) await audit(me.name, emailsOn ? "turned client emails on" : "turned client emails off", c.name, notifyEmail);
+  else if (c.notifyEmail !== notifyEmail) await audit(me.name, "changed client email contact", c.name, `${c.notifyEmail ?? "none"} → ${notifyEmail ?? "none"}`);
+  revalidatePath("/team/admin");
+  return {
+    ok: emailsOn
+      ? `Emails are on. ${c.name}'s updates go to ${notifyEmail}${found ? ` (${found} in GHL)` : ""}.`
+      : notifyEmail ? `Linked to ${notifyEmail}${found ? ` (${found} in GHL)` : ""}. Emails are off.` : "Saved. Emails are off.",
+  };
 }

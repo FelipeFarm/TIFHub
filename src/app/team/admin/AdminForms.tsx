@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { makeResetLink, saveClient, saveTeamMember, type AdminState } from "@/app/admin-actions";
+import { makeResetLink, saveClient, saveClientEmails, saveTeamMember, type AdminState } from "@/app/admin-actions";
 import { FormError, SubmitButton } from "@/components/forms";
 
 /** A one-time sign-in link, shown once right after it's made. */
@@ -168,6 +168,28 @@ export function LinkButton({ userType, id, waiting }: { userType: "client" | "te
         <SubmitButton className="btn sm ghost" pendingText="Making link…">
           {waiting ? "New welcome link" : "Password reset link"}
         </SubmitButton>
+      </div>
+    </form>
+  );
+}
+
+export function ClientEmailsForm({ client }: { client: { id: string; name: string; notifyEmail: string | null; emailsOn: boolean } }) {
+  const [state, action] = useActionState(saveClientEmails, undefined);
+  return (
+    <form action={action} className="stack" style={{ gap: 10, borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+      <b>Client emails (sent through GHL)</b>
+      <FormError state={state} />
+      {state?.ok && <div className="alert ok">{state.ok}</div>}
+      <input type="hidden" name="id" value={client.id} />
+      <div className="field">
+        <label className="lbl" htmlFor={`ne-${client.id}`}>GHL contact email (must already exist in GHL)</label>
+        <input className="input" id={`ne-${client.id}`} name="notifyEmail" type="email" defaultValue={client.notifyEmail ?? ""} placeholder="e.g. owner@theircompany.com" />
+      </div>
+      <label className="check-row">
+        <input type="checkbox" name="emailsOn" defaultChecked={client.emailsOn} /> Send {client.name} email updates (received, replies, status, approvals)
+      </label>
+      <div>
+        <SubmitButton className="btn sm" pendingText="Checking GHL…">Save email settings</SubmitButton>
       </div>
     </form>
   );

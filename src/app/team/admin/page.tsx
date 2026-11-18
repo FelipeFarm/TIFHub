@@ -5,7 +5,7 @@ import { clients, team } from "@/db/schema";
 import { NO_PASSWORD, requireAdmin } from "@/lib/auth";
 import { listMondayUsers } from "@/lib/monday";
 import { setClientActive, setTeamActive } from "@/app/admin-actions";
-import { ClientForm, LinkButton, TeamForm } from "./AdminForms";
+import { ClientEmailsForm, ClientForm, LinkButton, TeamForm } from "./AdminForms";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +58,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
                       <small className="muted" style={{ display: "block" }}>
                         {c.loginEmail} · Lead: {(c.leadId && nameOf.get(c.leadId)) || "not set"}
                         {c.backupId ? ` · Backup: ${nameOf.get(c.backupId) ?? "?"}` : ""}
+                        {c.emailsOn ? " · Emails on" : " · Emails off"}
                       </small>
                     </span>
                     {!c.active ? (
@@ -71,6 +72,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
                   <div className="stack" style={{ marginTop: 14 }}>
                     {c.active && <ClientForm team={activeTeam} client={c} />}
                     {c.active && <LinkButton userType="client" id={c.id} waiting={waiting} />}
+                    {c.active && <ClientEmailsForm client={c} />}
                     <form action={setClientActive}>
                       <input type="hidden" name="id" value={c.id} />
                       <input type="hidden" name="active" value={c.active ? "0" : "1"} />

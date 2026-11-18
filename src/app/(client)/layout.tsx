@@ -1,5 +1,6 @@
 import { getDb } from "@/db";
 import { requireClient } from "@/lib/auth";
+import { sendDueEmails } from "@/lib/outbox";
 import { turnCount } from "@/lib/queries";
 import { Nav } from "@/components/Nav";
 
@@ -7,6 +8,8 @@ export const dynamic = "force-dynamic";
 
 export default async function ClientLayout({ children }: { children: React.ReactNode }) {
   const client = await requireClient();
+  // No scheduler on Webflow Cloud: page views send client emails that were held back to merge.
+  await sendDueEmails();
   const n = await turnCount(await getDb(), client.id);
   return (
     <div className="app">

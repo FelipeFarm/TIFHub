@@ -4,10 +4,12 @@ import { getDb } from "@/db";
 import { outbox } from "@/db/schema";
 import { deliverMonday, mondayConfig } from "./monday";
 import { deliverSlack, slackConfig } from "./slack";
+import { WORKFLOWS, flushGhl, type EmailPayload } from "./ghl";
 
 /**
  * Queue something for GHL (client emails), monday (items/updates) or Slack (team alerts), then try to send it.
- * monday and Slack send right away. GHL events stay "pending" until step 4b.
+ * monday and Slack send right away. GHL emails go through flushGhl, which merges events on the same
+ * request into one email per 10 minutes.
  * Sending never blocks or breaks what the person was doing: failures stay in the
  * Outbox with the reason, and the team can send them again from there.
  */
@@ -29,7 +31,19 @@ export async function queue(
   });
   if (target === "monday") await sendLater(() => flushMonday(link.requestId ?? null));
   if (target === "slack") await sendLater(() => flushSlack());
+  if (target === "ghl") await sendLater(() => flushGhl());
 }
+
+/** Queues a client email (sent through GHL). */
+export async function emailClient(p: EmailPayload, link: { requestId?: number; approvalId?: number }) {
+  await queue("ghl", "email", `Email client: ${WORKFLOWS[p.kind].label} · "${p.title}"`, p, link);
+}
+
+/** Sends client emails whose 10-minute window has passed. Called when anyone uses the Hub. */
+export async function sendDueEmails() {
+  await sendLater(() => flushGhl());
+}
+export const flushGhlNow = () => flushGhl(true);
 
 /** Runs after the response is sent when the runtime allows it, so the page doesn't wait on monday. */
 async function sendLater(job: () => Promise<unknown>) {

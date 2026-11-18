@@ -27,6 +27,9 @@ export const clients = sqliteTable("clients", {
   // Filled in during step 4 (monday + GHL connection).
   mondayGroupId: text("monday_group_id"),
   ghlContactId: text("ghl_contact_id"),
+  // The GHL contact that gets this client's Hub emails, and the switch for sending them (off until someone turns it on).
+  notifyEmail: text("notify_email"),
+  emailsOn: integer("emails_on", { mode: "boolean" }).notNull().default(false),
   // Deactivated clients can't sign in; their requests stay for the record.
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   createdAt: integer("created_at").notNull(),
