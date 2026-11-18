@@ -219,7 +219,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
         </table>
       </div>
       <p className="muted" style={{ marginTop: 12 }}>
-        Requests where we&apos;re just doing the work don&apos;t show here. They&apos;re in monday (once step 4 connects it).
+        Requests where we&apos;re just doing the work don&apos;t show here. They&apos;re on the monday Hub Requests board.
       </p>
     </>
   );
