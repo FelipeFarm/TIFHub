@@ -138,7 +138,7 @@ export async function flushGhl(manual = false) {
     try {
       await call(cfg, "PUT", `/contacts/${client.ghlContactId}`, {
         customFields: [
-          { id: FIELDS.title, field_value: latest.title.slice(0, 200) },
+          { id: FIELDS.title, field_value: latest.title.replace(/[\s.!?…:;,]+$/u, "").slice(0, 200) }, // the templates add their own punctuation
           { id: FIELDS.status, field_value: latest.status },
           { id: FIELDS.message, field_value: message },
           { id: FIELDS.link, field_value: `${cfg.hubUrl}${top.path}` },
