@@ -10,7 +10,8 @@
     "db:seed": "node scripts/seed.mjs && wrangler d1 execute DB --local --file=seed/seed.sql",
     "db:reset": "rm -rf .wrangler/state && npm run db:migrate && npm run db:seed",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "preview:worker": "wrangler dev --port 4184 --ip 127.0.0.1"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "1.20.17",
