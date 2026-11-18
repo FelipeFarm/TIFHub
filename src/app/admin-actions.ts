@@ -9,8 +9,9 @@ import { getDb, getEnv } from "@/db";
 import { clients, loginLinks, team } from "@/db/schema";
 import {
   LINK_HOURS, NO_PASSWORD, audit, clearFailures, createSession, endAllSessions, findLoginLink, hashPassword,
-  makeLoginLink, passwordProblem, requireAdmin,
+  isLockedOut, makeLoginLink, passwordProblem, recordFailure, requireAdmin,
 } from "@/lib/auth";
+import { sameSecret, setupOpen, setupSecret } from "@/lib/setup";
 import { fmtDayTime } from "@/lib/time";
 
 export type AdminState = { error?: string; ok?: string; link?: string; linkFor?: string; linkExpires?: string } | undefined;
@@ -203,4 +204,37 @@ export async function setPassword(_: AdminState, fd: FormData): Promise<AdminSta
   await audit(found.name, link.purpose === "invite" ? "set first password" : "reset password", userType);
   await createSession(userType, link.userId, false);
   redirect(userType === "team" ? "/team" : "/");
+}
+
+/* ------------------------------------------------------------ first admin */
+
+export async function createFirstAdmin(_: AdminState, fd: FormData): Promise<AdminState> {
+  if (!(await setupOpen())) return { error: "Setup is closed." };
+  const secret = String(fd.get("secret") ?? "");
+  const name = str(fd, "name", 120);
+  const email = str(fd, "email").toLowerCase();
+  // Wrong secrets count toward the same lockout as sign-ins (per network address).
+  if (await isLockedOut("setup")) return { error: "Too many tries. Wait 15 minutes." };
+  if (!sameSecret(secret, (await setupSecret())!)) {
+    await recordFailure("setup");
+    await audit("unknown", "wrong setup secret", null, null);
+    return { error: "That setup secret isn't right." };
+  }
+  if (!name) return { error: "Add your name." };
+  if (!EMAIL.test(email)) return { error: "That email doesn't look right." };
+
+  const db = await getDb();
+  const existing = await db.query.team.findFirst({ where: eq(team.email, email) });
+  let id = existing?.id;
+  if (existing) {
+    await db.update(team).set({ role: "admin", active: true, name, initials: initialsOf(name) }).where(eq(team.id, existing.id));
+  } else {
+    if (await emailTaken(email)) return { error: "That email is used by a client account." };
+    id = newId("t");
+    await db.insert(team).values({ id, name, initials: initialsOf(name), email, passwordHash: NO_PASSWORD, role: "admin" });
+  }
+  await clearFailures("setup");
+  await audit(name, "first admin set up", email);
+  const { token } = await makeLoginLink("team", id!, "invite", "setup page");
+  redirect(`/set-password/${token}`);
 }

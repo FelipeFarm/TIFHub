@@ -7,4 +7,8 @@ interface CloudflareEnv {
   HUB_URL: string;
   MONDAY_API_TOKEN?: string;
   MONDAY_ITEM_PREFIX?: string;
+  SETUP_SECRET?: string;
+  SLACK_WEBHOOK_URL?: string;
+  GHL_API_TOKEN?: string;
+  GHL_LOCATION_ID?: string;
 }

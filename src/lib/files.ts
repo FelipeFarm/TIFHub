@@ -41,7 +41,8 @@ export async function saveFiles(
   return saved;
 }
 
-export const fileUrl = (key: string) => `/files/${key.split("/").map(encodeURIComponent).join("/")}`;
+// Webflow Cloud may serve the Hub under a mount path (e.g. /hub); plain <img> and <a> tags need it added.
+export const fileUrl = (key: string) => `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/files/${key.split("/").map(encodeURIComponent).join("/")}`;
 
 export function fileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
