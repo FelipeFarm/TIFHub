@@ -1,0 +1,10 @@
+node_modules
+.next
+.open-next
+.wrangler
+.dev.vars
+*.tsbuildinfo
+next-env.d.ts
+seed/seed.sql
+seed/dev-logins.txt
+.DS_Store
