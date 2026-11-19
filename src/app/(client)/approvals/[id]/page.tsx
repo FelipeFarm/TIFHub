@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { approvalItems, approvals } from "@/db/schema";
+import { approvalItems, approvals, attachments } from "@/db/schema";
 import { rememberedName, requireClient } from "@/lib/auth";
 import { fileUrl } from "@/lib/files";
+import { linkLabel, safeLink } from "@/lib/links";
 import { teamMap } from "@/lib/queries";
 import { firstName } from "@/lib/sentences";
 import { fmtDateInput, fmtDay } from "@/lib/time";
@@ -23,6 +24,14 @@ export default async function ApprovalPage({
   if (!a) notFound();
   const items = await db.query.approvalItems.findMany({ where: eq(approvalItems.approvalId, id), orderBy: [asc(approvalItems.position)] });
   const owner = a.ownerId ? (await teamMap(db)).get(a.ownerId) : undefined;
+  const keys = items.map((i) => i.imageKey).filter((k): k is string => !!k);
+  const files = keys.length ? await db.query.attachments.findMany({ where: inArray(attachments.key, keys) }) : [];
+  const fileOf = (key: string | null) => {
+    const f = key ? files.find((x) => x.key === key) : undefined;
+    if (!f) return null;
+    const kind: "image" | "pdf" | "other" = f.type.startsWith("image/") ? "image" : f.type === "application/pdf" ? "pdf" : "other";
+    return { url: fileUrl(f.key), kind, name: f.name };
+  };
 
   if ((await searchParams).done) {
     const changes = items.filter((i) => i.decision === "changes").length;
@@ -58,14 +67,20 @@ export default async function ApprovalPage({
           approvalId={a.id}
           due={a.due ? fmtDateInput(a.due) : null}
           defaultName={await rememberedName()}
-          items={items.map((i) => ({
-            id: i.id,
-            caption: i.caption,
-            when: i.whenLabel,
-            image: i.imageKey ? fileUrl(i.imageKey) : null,
-            decision: i.decision,
-            previousComment: i.previousComment,
-          }))}
+          kind={a.kind === "blog" ? "blog" : "posts"}
+          items={items.map((i) => {
+            const link = safeLink(i.linkUrl);
+            return {
+              id: i.id,
+              caption: i.caption,
+              when: i.whenLabel,
+              file: fileOf(i.imageKey),
+              link: link ? { url: link, label: linkLabel(link) } : null,
+              body: i.body,
+              decision: i.decision,
+              previousComment: i.previousComment,
+            };
+          })}
         />
       ) : (
         <div className="banner done">

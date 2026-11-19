@@ -3,13 +3,14 @@
 import { redirect } from "next/navigation";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { approvalItems, approvals, clients, messages, offerEvents, outbox, requests, team } from "@/db/schema";
+import { approvalItems, approvals, attachments, clients, messages, offerEvents, outbox, requests, team } from "@/db/schema";
 import {
   audit, burnTime, clearFailures, createSession, destroySession, isLockedOut, recordFailure, rememberName, rememberedName, requireClient,
   requireTeam, verifyPassword,
 } from "@/lib/auth";
 import { CHANNELS, NEED_ACTIONS, SERVICES, STATUS, URGENCY, type ServiceKey } from "@/lib/constants";
 import { checkFiles, filesFrom, saveFiles } from "@/lib/files";
+import { safeLink } from "@/lib/links";
 import { emailClient, flushGhlNow, flushMonday, flushSlack, queue } from "@/lib/outbox";
 import { interestAlert, requestAlert, reviewAlert } from "@/lib/slack";
 import { SERVICE_NAMES, availableOffers, isOfferService, offersLive } from "@/lib/offers";
@@ -313,33 +314,54 @@ export async function sendApproval(_: FormState, fd: FormData): Promise<FormStat
   const db = await getDb();
   const client = await db.query.clients.findFirst({ where: and(eq(clients.id, str(fd, "clientId", 40)), eq(clients.active, true)) });
   if (!client) return { error: "Pick a client." };
+  const kind = str(fd, "kind", 10) === "blog" ? "blog" : "posts";
   const title = str(fd, "title", 120);
-  if (!title) return { error: "Give it a name, like “December social posts”." };
-  const count = Math.min(Number(fd.get("count")) || 0, 40);
-  const items: { caption: string; when: string; file: File | null }[] = [];
-  for (let i = 0; i < count; i++) {
-    const caption = str(fd, `caption_${i}`, 2000);
-    const f = fd.get(`file_${i}`);
-    const file = f instanceof File && f.size > 0 ? f : null;
-    if (caption || file) items.push({ caption, when: str(fd, `when_${i}`, 80), file });
+  if (!title) return { error: kind === "blog" ? "Give it a name, like “December blog articles”." : "Give it a name, like “December social posts”." };
+
+  type In = { key: string | null; caption: string; when: string; link: string; body: string };
+  let raw: In[] = [];
+  try {
+    raw = JSON.parse(String(fd.get("items") ?? "[]"));
+  } catch {
+    return { error: "Something went wrong reading the items. Try again." };
   }
+  if (!Array.isArray(raw)) raw = [];
+  const items = raw.slice(0, 60).map((i) => ({
+    key: typeof i.key === "string" ? i.key : null,
+    caption: String(i.caption ?? "").trim().slice(0, 2000),
+    when: String(i.when ?? "").trim().slice(0, 80),
+    rawLink: String(i.link ?? "").trim(),
+    link: safeLink(String(i.link ?? "")),
+    body: kind === "blog" ? String(i.body ?? "").trim().slice(0, 60000) : "",
+  })).filter((i) => i.key || i.caption || i.link || i.body);
   if (!items.length) return { error: "Add at least one item for them to approve." };
-  const fileError = checkFiles(items.flatMap((i) => (i.file ? [i.file] : [])));
-  if (fileError) return { error: fileError };
+  const badLink = items.find((i) => i.rawLink && !i.link);
+  if (badLink) return { error: `“${badLink.rawLink.slice(0, 60)}” isn't a link we can use. Links must start with https://.` };
+  if (kind === "blog" && items.some((i) => !i.caption)) return { error: "Every article needs a title." };
+  if (kind === "blog" && items.some((i) => !i.body && !i.link && !i.key)) return { error: "Each article needs its text, a Google Doc link or a file." };
+
+  // Files were uploaded ahead of time: each must belong to this client and not be used anywhere yet.
+  const keys = items.map((i) => i.key).filter((k): k is string => !!k);
+  if (new Set(keys).size !== keys.length) return { error: "The same file is in the list twice." };
+  if (keys.length) {
+    const rows = await db.query.attachments.findMany({ where: inArray(attachments.key, keys) });
+    const ok = rows.filter((r) => r.clientId === client.id && !r.approvalId && !r.requestId && !r.messageId);
+    if (ok.length !== keys.length) return { error: "Some files don't belong to this client. Remove them and upload again." };
+  }
 
   const now = Date.now();
   const [appr] = await db
     .insert(approvals)
     .values({
-      clientId: client.id, service: oneOf(str(fd, "service"), ["social", "seo", "ads", "web"], "social"), title,
+      clientId: client.id, kind, service: oneOf(str(fd, "service"), ["social", "seo", "ads", "web"], kind === "blog" ? "seo" : "social"), title,
       note: str(fd, "note", 2000) || null, due: str(fd, "due", 10) || null, ownerId: me.id, sentAt: now,
     })
     .returning();
+  if (keys.length) await db.update(attachments).set({ approvalId: appr.id }).where(inArray(attachments.key, keys));
   for (const [pos, it] of items.entries()) {
-    const [saved] = it.file ? await saveFiles([it.file], { clientId: client.id, approvalId: appr.id }) : [];
     await db.insert(approvalItems).values({
-      approvalId: appr.id, position: pos + 1, caption: it.caption || it.file?.name || `Item ${pos + 1}`,
-      whenLabel: it.when || null, imageKey: saved?.key ?? null,
+      approvalId: appr.id, position: pos + 1, caption: it.caption || `Item ${pos + 1}`,
+      whenLabel: it.when || null, imageKey: it.key, linkUrl: it.link, body: it.body || null,
     });
   }
   await emailClient({
@@ -367,6 +389,8 @@ export async function resendItem(fd: FormData) {
     .set({
       caption: str(fd, "caption", 2000) || item.caption,
       imageKey: saved?.key ?? item.imageKey,
+      linkUrl: fd.has("link") ? safeLink(str(fd, "link", 500)) : item.linkUrl,
+      body: fd.has("body") ? str(fd, "body", 60000) || item.body : item.body,
       decision: "pending",
       previousComment: item.comment,
       comment: null,

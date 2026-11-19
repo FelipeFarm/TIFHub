@@ -78,7 +78,11 @@ export default async function TeamApprovals({ searchParams }: { searchParams: Pr
                     </div>
                     <form action={resendItem}>
                       <input type="hidden" name="itemId" value={i.id} />
-                      <input className="input" name="caption" defaultValue={i.caption} aria-label="Updated caption" />
+                      <input className="input" name="caption" defaultValue={i.caption} aria-label={a.kind === "blog" ? "Updated title" : "Updated caption"} />
+                      {a.kind === "blog" && (
+                        <textarea className="input" name="body" defaultValue={i.body ?? ""} rows={6} aria-label="Updated article text" />
+                      )}
+                      <input className="input" name="link" defaultValue={i.linkUrl ?? ""} placeholder="Link (optional)" aria-label="Updated link" />
                       <input type="file" name="file" accept="image/*,.pdf" aria-label="Replacement image" />
                       <button className="btn sm">Fix &amp; resend</button>
                     </form>

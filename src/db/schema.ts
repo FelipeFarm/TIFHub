@@ -160,6 +160,8 @@ export const approvals = sqliteTable("approvals", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   clientId: text("client_id").notNull(),
   service: text("service").notNull().default("social"),
+  // posts: social posts, ads, images, videos (as links) · blog: articles to read and approve
+  kind: text("kind").notNull().default("posts"),
   title: text("title").notNull(),
   note: text("note"),
   due: text("due"), // YYYY-MM-DD
@@ -170,7 +172,11 @@ export const approvals = sqliteTable("approvals", {
   reviewedAt: integer("reviewed_at"),
 });
 
-/** decision: pending | approved | changes */
+/**
+ * decision: pending | approved | changes
+ * caption = the post text, or the article title for blogs. body = the full article (blogs).
+ * imageKey = an uploaded image or PDF. linkUrl = a video or doc to review elsewhere (https only).
+ */
 export const approvalItems = sqliteTable("approval_items", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   approvalId: integer("approval_id").notNull(),
@@ -178,6 +184,8 @@ export const approvalItems = sqliteTable("approval_items", {
   caption: text("caption").notNull(),
   whenLabel: text("when_label"),
   imageKey: text("image_key"),
+  linkUrl: text("link_url"),
+  body: text("body"),
   decision: text("decision").notNull().default("pending"),
   comment: text("comment"),
   previousComment: text("previous_comment"),
