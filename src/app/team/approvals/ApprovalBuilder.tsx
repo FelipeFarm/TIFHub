@@ -34,6 +34,8 @@ export function ApprovalBuilder({ clients, defaultDue }: { clients: { id: string
   const [due, setDue] = useState(defaultDue);
   const [note, setNote] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  // The picked files, kept so a failed upload can be retried without picking it again.
+  const picked = useRef(new Map<string, File>());
 
   const patch = (id: string, p: Partial<Item>) => setItems((list) => list.map((i) => (i.uid === id ? { ...i, ...p } : i)));
   const uploading = items.some((i) => i.status === "uploading");
@@ -41,13 +43,19 @@ export function ApprovalBuilder({ clients, defaultDue }: { clients: { id: string
   const hasFiles = items.some((i) => i.status !== "none");
 
   async function upload(file: File, id: string) {
+    picked.current.set(id, file);
+    patch(id, { status: "uploading", error: undefined });
     const fd = new FormData();
     fd.append("clientId", clientId);
     fd.append("file", file);
     try {
       const res = await fetch("upload", { method: "POST", body: fd });
       const data = (await res.json().catch(() => ({}))) as { key?: string; error?: string };
-      if (!res.ok || !data.key) throw new Error(data.error || `Upload failed (${res.status})`);
+      if (!data.key)
+        throw new Error(
+          data.error ||
+            (res.status === 401 ? "You were signed out. Sign in again and re-add the file." : res.status === 413 ? "That file is too big." : `Upload failed (error ${res.status}). Try again, or tell Felipe.`),
+        );
       patch(id, { status: "done", key: data.key });
     } catch (e) {
       patch(id, { status: "error", error: (e as Error).message });
@@ -217,6 +225,11 @@ export function ApprovalBuilder({ clients, defaultDue }: { clients: { id: string
               <small className={it.status === "error" ? "err-text" : "muted"}>
                 {it.status === "uploading" ? "Uploading…" : it.status === "done" ? "Uploaded ✓" : it.error}
               </small>
+              {it.status === "error" && picked.current.get(it.uid) && (
+                <button type="button" className="btn sm ghost" onClick={() => upload(picked.current.get(it.uid)!, it.uid)}>
+                  Try again
+                </button>
+              )}
             </div>
           )}
           {kind === "blog" ? (
