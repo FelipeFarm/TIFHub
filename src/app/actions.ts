@@ -14,7 +14,7 @@ import { safeLink } from "@/lib/links";
 import { emailClient, flushGhlNow, flushMonday, flushSlack, queue } from "@/lib/outbox";
 import { interestAlert, requestAlert, reviewAlert } from "@/lib/slack";
 import { SERVICE_NAMES, availableOffers, isOfferService, offersLive } from "@/lib/offers";
-import { fmtDateInput, replyByFor, replyByLabel } from "@/lib/time";
+import { dueDateFor, fmtDateInput, replyByFor, replyByLabel } from "@/lib/time";
 
 export type FormState = { error?: string } | undefined;
 
@@ -100,7 +100,7 @@ export async function createRequest(_: FormState, fd: FormData): Promise<FormSta
     .insert(requests)
     .values({
       clientId: client.id, service, type, title: titleFrom(details), details, pageUrl, urgency, askedBy,
-      ownerId: client.leadId, replyBy: replyByFor(urgency, now), createdAt: now, updatedAt: now,
+      ownerId: client.leadId, replyBy: replyByFor(urgency, now), expected: dueDateFor(urgency, now), createdAt: now, updatedAt: now,
     })
     .returning();
   const [msg] = await db
@@ -138,9 +138,22 @@ export async function clientReply(_: FormState, fd: FormData): Promise<FormState
     .values({ requestId: id, authorType: "client", authorName: name, body: body || `Sent ${files.length} file${files.length > 1 ? "s" : ""}`, createdAt: now })
     .returning();
   await saveFiles(files, { clientId: client.id, requestId: id, messageId: msg.id });
-  await db.update(requests).set({ clientRepliedAt: now, updatedAt: now }).where(eq(requests.id, id));
+  // Their answer hands it back: "Your turn" becomes "In progress" for the client, the team and monday.
+  const backToUs = req.status === "your_turn";
+  await db
+    .update(requests)
+    .set({ clientRepliedAt: now, updatedAt: now, ...(backToUs ? { status: "in_progress", needText: null, statusLine: null } : {}) })
+    .where(eq(requests.id, id));
+  if (backToUs) {
+    const owner = req.ownerId ? await db.query.team.findFirst({ where: eq(team.id, req.ownerId) }) : null;
+    await db.insert(messages).values({
+      requestId: id, authorType: "system", authorName: name,
+      body: `${name} replied, so this is back with ${owner?.name.split(" ")[0] ?? "the team"}`, createdAt: now + 1,
+    });
+  }
   await rememberName(name);
   await queue("monday", "add_update", `Add client reply to monday item for "${req.title}"`, { requestId: id, name, body }, { requestId: id });
+  if (backToUs) await queue("monday", "update_item", `Update monday item for "${req.title}" (back to In progress)`, { requestId: id, status: "in_progress" }, { requestId: id });
   await queue("slack", "alert", `Slack: ${client.name} replied on "${req.title}"`, { text: await requestAlert("reply", req, name) }, { requestId: id });
   redirect(`/requests/${id}`);
 }
@@ -292,7 +305,7 @@ export async function logRequest(_: FormState, fd: FormData): Promise<FormState>
     .insert(requests)
     .values({
       clientId: client.id, service, type: null, title: str(fd, "title", 120) || titleFrom(details), details, urgency, askedBy,
-      channel, ownerId, replyBy: replyByFor(urgency, now), createdAt: now, updatedAt: now,
+      channel, ownerId, replyBy: replyByFor(urgency, now), expected: dueDateFor(urgency, now), createdAt: now, updatedAt: now,
     })
     .returning();
   await db.insert(messages).values([

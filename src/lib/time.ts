@@ -58,3 +58,19 @@ export function replyByLabel(replyBy: number, now = Date.now()) {
 export function todayInput(offsetDays = 0) {
   return dayKey(Date.now() + offsetDays * DAY);
 }
+
+/** Adds business days (Mon–Fri) in the Hub's time zone. */
+export function addBusinessDays(ms: number, days: number) {
+  let t = ms;
+  for (let i = 0; i < days; i++) t = nextBusinessDay(t);
+  return t;
+}
+
+/**
+ * Default due date from "How soon", matching the monday Priority labels
+ * (Urgent = 1 business day, This week = 3–4, No rush = 5–7). The team can change it.
+ */
+export function dueDateFor(urgency: string, now = Date.now()) {
+  const days = urgency === "urgent" ? 1 : urgency === "this_week" ? 4 : 7;
+  return dayKey(addBusinessDays(now, days));
+}

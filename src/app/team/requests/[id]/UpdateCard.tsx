@@ -67,20 +67,15 @@ export function UpdateCard({ request: r, team, replyByText }: Props) {
               onChange={(e) => setStatusLine(e.target.value)}
             />
           </div>
-          <div className="field">
-            <label className="lbl" htmlFor="expected">
-              Expected <span>· optional</span>
-            </label>
-            <input className="input" id="expected" name="expected" type="date" value={expected} onChange={(e) => setExpected(e.target.value)} />
-          </div>
         </>
       )}
-      {status !== "in_progress" && (
-        <>
-          <input type="hidden" name="statusLine" value={statusLine} />
-          <input type="hidden" name="expected" value={expected} />
-        </>
-      )}
+      {status !== "in_progress" && <input type="hidden" name="statusLine" value={statusLine} />}
+      <div className="field">
+        <label className="lbl" htmlFor="expected">
+          Due date <span>· syncs to monday; the client sees it as &quot;Expected&quot; while it&apos;s in progress</span>
+        </label>
+        <input className="input" id="expected" name="expected" type="date" value={expected} onChange={(e) => setExpected(e.target.value)} />
+      </div>
       {status === "your_turn" ? (
         <>
           <div className="field">
