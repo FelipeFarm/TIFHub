@@ -9,6 +9,8 @@ import { teamMap } from "@/lib/queries";
 import { ago, replyByLabel } from "@/lib/time";
 import { Files, initialsOf, Thread } from "@/components/ui";
 import { TeamReply } from "./TeamReply";
+import { mondayConfig } from "@/lib/monday";
+import { ghlConfig } from "@/lib/ghl";
 import { UpdateCard } from "./UpdateCard";
 
 export default async function TeamRequest({
@@ -30,6 +32,13 @@ export default async function TeamRequest({
     db.query.outbox.findMany({ where: eq(outbox.requestId, id) }),
   ]);
   const rb = replyByLabel(r.replyBy);
+  const [monday, ghl] = await Promise.all([mondayConfig(), ghlConfig()]);
+  const mondayRows = queued.filter((q) => q.target === "monday");
+  const mondayFailed = mondayRows.some((q) => q.status === "failed");
+  const emails = queued.filter((q) => q.target === "ghl" && q.kind === "email");
+  const lastEmail = emails.filter((q) => q.status === "sent" && !q.error).sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0))[0];
+  const emailsWaiting = emails.filter((q) => q.status === "pending" || q.status === "sending").length;
+  const emailsFailed = emails.filter((q) => q.status === "failed").length;
   const meta = [
     `REQ-${1000 + r.id}`,
     client?.name,
@@ -83,15 +92,47 @@ export default async function TeamRequest({
           <div className="card">
             <h2>Connected</h2>
             <div className="sync">
-              <b>monday</b> · not connected yet (step 4)
-              <br />
-              Will sync to the new Client Hub board
+              <b>monday</b> ·{" "}
+              {!monday ? (
+                "not connected"
+              ) : r.mondayItemId ? (
+                <>
+                  on the Hub Requests board ·{" "}
+                  <a href={`https://the-idea-farm.monday.com/boards/${monday.boardId}/pulses/${r.mondayItemId}`} target="_blank" rel="noopener noreferrer">
+                    open item ↗
+                  </a>
+                </>
+              ) : mondayRows.length === 0 ? (
+                "not on monday (came in before monday was connected)"
+              ) : mondayFailed ? (
+                <>
+                  didn&apos;t sync · <Link href="/team/outbox">see the Outbox</Link>
+                </>
+              ) : (
+                "sending…"
+              )}
             </div>
             <div className="sync">
-              <b>GHL</b> · not connected yet (step 4)
-              <br />
-              {queued.filter((q) => q.target === "ghl").length} client emails waiting in the{" "}
-              <Link href="/team/outbox">outbox</Link>
+              <b>Client emails (GHL)</b> ·{" "}
+              {!ghl ? (
+                "not connected"
+              ) : !client?.emailsOn ? (
+                <>
+                  off for this client · <Link href="/team/admin">turn on in Admin</Link>
+                </>
+              ) : (
+                <>
+                  on, to {client.notifyEmail}
+                  <br />
+                  {lastEmail ? `Last email ${ago(lastEmail.sentAt!)}` : "No emails sent yet"}
+                  {emailsWaiting > 0 && ` · ${emailsWaiting} waiting (sent as one email within 10 min)`}
+                  {emailsFailed > 0 && (
+                    <>
+                      {" "}· {emailsFailed} didn&apos;t send · <Link href="/team/outbox">see the Outbox</Link>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </aside>
