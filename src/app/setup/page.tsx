@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { setupOpen } from "@/lib/setup";
 import { SetupForm } from "./SetupForm";
+import { Logo } from "@/components/Logo";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ export default async function SetupPage() {
     <div className="login-wrap">
       <div className="login">
         <div className="logo">
-          <i>IF</i>The Idea Farm
+          <Logo height={84} />
         </div>
         <h1>Set up the first admin</h1>
         <p className="sub">

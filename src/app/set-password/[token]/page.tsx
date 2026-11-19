@@ -1,5 +1,6 @@
 import { findLoginLink, MIN_PASSWORD } from "@/lib/auth";
 import { SetPasswordForm } from "./SetPasswordForm";
+import { Logo } from "@/components/Logo";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ export default async function SetPasswordPage({ params }: { params: Promise<{ to
     <div className="login-wrap">
       <div className="login">
         <div className="logo">
-          <i>IF</i>The Idea Farm
+          <Logo height={84} />
         </div>
         {found ? (
           <>

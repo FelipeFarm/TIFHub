@@ -287,3 +287,12 @@ tr.none td{color:var(--ink3);font-size:13px}
 .err-text{color:#8c2a17;font-size:13px}
 .itemrow textarea.input{min-height:0}
 .chg-item form{display:flex;flex-direction:column;gap:6px;min-width:220px}
+
+/* brand logo: the image has a white background; multiply makes it sit cleanly on the off-white UI */
+.brand{display:block;width:auto;max-width:100%;mix-blend-mode:multiply}
+.side .logo{margin:0 0 14px;padding:2px 0}
+.login .logo{margin-bottom:20px}
+.mobile-brand{display:none}
+@media (max-width:760px){
+  .mobile-brand{display:flex;justify-content:center;padding:14px 16px 0;background:var(--bg)}
+}

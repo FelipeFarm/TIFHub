@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/actions";
+import { Logo } from "./Logo";
 
 /** prefixes: other paths that should highlight this item (e.g. detail pages). */
 type Item = { href: string; label: string; badge?: string; prefixes?: string[] };
@@ -22,7 +23,7 @@ export function Nav({
     <>
       <nav className="side" aria-label="Main">
         <Link href={items[0].href} className="logo">
-          <i>IF</i>The Idea Farm
+          <Logo height={62} />
         </Link>
         <Link href={cta.href} className="cta">
           {cta.label}
@@ -42,6 +43,9 @@ export function Nav({
           </form>
         </div>
       </nav>
+      <Link href={items[0].href} className="mobile-brand" aria-label="Home">
+        <Logo height={40} />
+      </Link>
       {tabbar && (
         <nav className="tabbar" aria-label="Main">
           <Link href={items[0].href} className={isOn(items[0]) ? "on" : ""}>
