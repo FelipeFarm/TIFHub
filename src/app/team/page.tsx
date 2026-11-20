@@ -5,7 +5,7 @@ import { approvals, offerEvents, requests, type Request } from "@/db/schema";
 import { requireTeam } from "@/lib/auth";
 import { serviceLabel, typeLabel, URGENCY } from "@/lib/constants";
 import { teamMap } from "@/lib/queries";
-import { duration, fmtDateInput, replyByLabel } from "@/lib/time";
+import { duration, fmtDateInput, replyByLabel, todayInput } from "@/lib/time";
 import { assignOwner, markInterestHandled } from "@/app/actions";
 import { SERVICE_NAMES, isOfferService } from "@/lib/offers";
 import { AssignSelect } from "./AssignSelect";
@@ -37,6 +37,12 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
   const reviewed = appr.filter((a) => a.status === "reviewed");
   const waiting = reqs.filter((r) => r.firstReplyAt && !r.clientRepliedAt && r.status === "your_turn");
   const waitingAppr = appr.filter((a) => a.status === "sent");
+  // Replied to and being worked on, with nothing new from the client: soonest due date first, no date last.
+  const working = reqs
+    .filter((r) => r.firstReplyAt && !r.clientRepliedAt && r.status !== "your_turn")
+    .sort((a, b) => (a.expected ?? "9999").localeCompare(b.expected ?? "9999"));
+  const today = todayInput();
+  const overdue = working.filter((r) => r.expected && r.expected < today).length;
   const late = needsReply.filter((r) => r.replyBy < now).length;
   const team = [...people.values()].filter((t) => t.active);
 
@@ -86,6 +92,10 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
           <b>{replied.length + reviewed.length}</b>
           <span>Client replied</span>
         </div>
+        <div className={`stat ${overdue ? "bad" : ""}`}>
+          <b>{working.length}</b>
+          <span>In progress{overdue ? ` · ${overdue} overdue` : ""}</span>
+        </div>
         <div className="stat">
           <b>{waiting.length + waitingAppr.length}</b>
           <span>Waiting on client</span>
@@ -117,7 +127,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
               <th>Request</th>
               <th>How soon</th>
               <th>Owner</th>
-              <th>Reply by</th>
+              <th>Reply by / due</th>
             </tr>
           </thead>
           <tbody>
@@ -220,6 +230,33 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
 
             <tr className="grp">
               <td colSpan={5}>
+                In progress <span>{working.length}</span>
+              </td>
+            </tr>
+            {working.map((r) => {
+              const late = !!r.expected && r.expected < today;
+              return (
+                <tr key={r.id}>
+                  {askedCell(r)}
+                  {reqCell(r)}
+                  <td>
+                    <span className={`pill ${r.urgency === "urgent" ? "urg" : ""}`}>{URGENCY[r.urgency as keyof typeof URGENCY]?.label}</span>
+                  </td>
+                  {ownerCell(r)}
+                  <td className={`sla ${late ? "late" : ""}`}>
+                    {r.expected ? `${late ? "Overdue · was due" : r.expected === today ? "Due today ·" : "Due"} ${fmtDateInput(r.expected)}` : "No due date"}
+                  </td>
+                </tr>
+              );
+            })}
+            {!working.length && (
+              <tr className="none">
+                <td colSpan={5}>Nothing in progress.</td>
+              </tr>
+            )}
+
+            <tr className="grp">
+              <td colSpan={5}>
                 Waiting on client <span>{waiting.length + waitingAppr.length}</span>
               </td>
             </tr>
@@ -257,7 +294,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
         </table>
       </div>
       <p className="muted" style={{ marginTop: 12 }}>
-        Requests where we&apos;re just doing the work don&apos;t show here. They&apos;re on the monday Hub Requests board.
+        Everything here is also on the monday Hub Requests board, with the same status and due date.
       </p>
     </>
   );

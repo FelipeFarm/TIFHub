@@ -191,7 +191,7 @@ a.req:hover{background:var(--soft)}
 .itemrow input[type=file]{font-size:12px;max-width:100%}
 
 /* team */
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
 .stat{border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;background:var(--paper)}
 .stat b{display:block;font-size:26px;font-weight:600;line-height:1.1}
 .stat span{color:var(--ink2);font-size:13px}
@@ -232,7 +232,7 @@ tr.none td{color:var(--ink3);font-size:13px}
   .grid2,.grid2.wide{grid-template-columns:1fr}
   .tiles,.tiles.four{grid-template-columns:1fr 1fr}
   .posts{grid-template-columns:1fr}
-  .stats{grid-template-columns:1fr 1fr 1fr}
+  .stats{grid-template-columns:1fr 1fr}
   .stat{padding:10px}
   .stat b{font-size:20px}
   h1{font-size:22px}

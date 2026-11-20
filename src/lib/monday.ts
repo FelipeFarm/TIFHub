@@ -2,7 +2,7 @@
 // Column ids come from that board (created 2026-11-18). If someone renames a
 // column in monday nothing breaks; deleting one does, so check before deleting.
 import { getDb, getEnv } from "@/db";
-import { attachments, clients, messages, requests, team } from "@/db/schema";
+import { attachments, clients, messages, outbox, requests, team } from "@/db/schema";
 import { CHANNELS, SERVICES, type ServiceKey } from "./constants";
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -211,6 +211,12 @@ export async function pullItemFromMonday(itemId: string, mondayUserId?: string |
   const db = await getDb();
   const req = await db.query.requests.findFirst({ where: eq(requests.mondayItemId, itemId) });
   if (!req) return { changed: [] as string[], reason: "Not a Hub item" };
+  // The Hub has its own change for this item still on the way to monday: monday is behind, so
+  // don't copy its older values back. Once that change lands, its echo brings us here again.
+  const inFlight = await db.query.outbox.findFirst({
+    where: and(eq(outbox.target, "monday"), eq(outbox.requestId, req.id), inArray(outbox.status, ["pending", "sending"])),
+  });
+  if (inFlight) return { changed: [] as string[], reason: "Hub change still being sent to monday" };
 
   const data = await gql<{ items: { id: string; board: { id: string }; column_values: { id: string; text: string | null; value: string | null }[] }[] }>(
     cfg,
@@ -225,8 +231,14 @@ export async function pullItemFromMonday(itemId: string, mondayUserId?: string |
   const changed: string[] = [];
   const status = HUB_STATUS[col(COL.status)?.text ?? ""];
   if (status && status !== req.status) {
+    const now = Date.now();
     patch.status = status;
-    patch.doneAt = status === "done" ? Date.now() : null;
+    patch.doneAt = status === "done" ? now : null;
+    // Same as moving it in the Hub: the team has dealt with the client's last message.
+    patch.clientRepliedAt = null;
+    patch.firstReplyAt = req.firstReplyAt ?? now;
+    if (status === "your_turn") patch.needAction = req.needAction ?? "Reply";
+    else patch.needText = null;
     changed.push(`status → ${col(COL.status)?.text}`);
   }
   const happening = (col(COL.happening)?.text ?? "").trim().slice(0, 160) || null;
@@ -258,6 +270,7 @@ export async function pullItemFromMonday(itemId: string, mondayUserId?: string |
     }
   }
   if (!changed.length) return { changed, reason: "Already up to date" };
+  const finalStatus = patch.status ?? req.status;
 
   const now = Date.now();
   await db.update(requests).set({ ...patch, updatedAt: now }).where(eq(requests.id, req.id));
@@ -265,8 +278,15 @@ export async function pullItemFromMonday(itemId: string, mondayUserId?: string |
   if (patch.status) {
     await db.insert(messages).values({
       requestId: req.id, authorType: "system", authorName: who ?? "monday",
-      body: `${who ?? "Someone"} moved this to ${col(COL.status)?.text === "Waiting on client" ? "Your turn" : col(COL.status)?.text} in monday`, createdAt: now,
+      body: `${who ? `${who} moved this` : "Moved"} to ${col(COL.status)?.text === "Waiting on client" ? "Your turn" : col(COL.status)?.text} in monday`, createdAt: now,
     });
   }
-  return { changed, reason: "Updated" };
+  // Which client email this calls for (sent only if that client has emails on, merged with others within 10 minutes).
+  const email =
+    finalStatus === "your_turn" && (patch.status || patch.needText !== undefined) && (patch.needText ?? req.needText)
+      ? { kind: "need" as const, message: (patch.needText ?? req.needText)! }
+      : patch.status === "done"
+        ? { kind: "status" as const, message: "All done. Something not right? Reply in the Hub and we'll reopen it." }
+        : null;
+  return { changed, reason: "Updated", request: { id: req.id, clientId: req.clientId, title: req.title, status: finalStatus }, email };
 }
